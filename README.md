@@ -53,6 +53,10 @@ dist 업로드
 GitHub Pages 배포
 ```
 
+`pnpm-workspace.yaml`에서 Vite가 사용하는 `esbuild`와 OCR 라이브러리인
+`tesseract.js`의 설치 스크립트를 명시적으로 허용합니다. 따라서 GitHub Actions의
+비대화식 설치 환경에서도 `ERR_PNPM_IGNORED_BUILDS` 오류 없이 설치됩니다.
+
 Actions 탭의 `Deploy to GitHub Pages`에서 `Run workflow`를 눌러 수동 재배포할 수도 있습니다.
 
 ## gh-pages 명령으로 수동 배포
