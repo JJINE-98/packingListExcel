@@ -1,5 +1,5 @@
-import { AlertCircle, BookOpen, CheckCircle2, Database, RefreshCcw, RotateCcw, Save } from "lucide-react";
-import { useEffect, useState } from "react";
+import { AlertCircle, BookOpen, CheckCircle2, Database, RefreshCcw, RotateCcw, Save, X } from "lucide-react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { DownloadExcelButton } from "./components/DownloadExcelButton";
 import { ExtractedDataTable } from "./components/ExtractedDataTable";
@@ -22,33 +22,97 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const [manualOpen, setManualOpen] = useState(false);
   const [managedExcel, setManagedExcel] = useState<File | null>(null);
+  const [documents, setDocuments] = useState<PackingListData[]>([]);
+  const [documentNames, setDocumentNames] = useState<string[]>([]);
+  const [activeDocument, setActiveDocument] = useState(-1);
 
-  useEffect(() => {
-    if (ocr.result) form.reset(ocr.result.data);
-  }, [ocr.result, form]);
+  const currentDocuments = () => {
+    const next = documents.map((document) => structuredClone(document));
+    if (activeDocument >= 0 && next[activeDocument]) next[activeDocument] = form.getValues();
+    return next;
+  };
+
+  const processFiles = async (files: File[]) => {
+    const existing = currentDocuments();
+    const results = await ocr.processFiles(files);
+    const next = [...existing, ...results.map((result) => result.data)];
+    setDocuments(next);
+    setDocumentNames((current) => [...current, ...files.map((file) => file.name)]);
+    const nextActive = next.length - 1;
+    setActiveDocument(nextActive);
+    if (nextActive >= 0) form.reset(next[nextActive]);
+    setNotice(`${results.length}개 PDF를 추가했습니다. 누적 ${next.length}건입니다.`);
+  };
+
+  const selectDocument = (index: number) => {
+    const next = currentDocuments();
+    setDocuments(next);
+    setActiveDocument(index);
+    form.reset(next[index]);
+  };
+
+  const removeDocument = (index: number) => {
+    const next = currentDocuments().filter((_, current) => current !== index);
+    const nextNames = documentNames.filter((_, current) => current !== index);
+    setDocuments(next);
+    setDocumentNames(nextNames);
+    if (!next.length) {
+      setActiveDocument(-1);
+      form.reset(createEmptyPackingList());
+      return;
+    }
+    const nextActive = Math.min(index, next.length - 1);
+    setActiveDocument(nextActive);
+    form.reset(next[nextActive]);
+  };
+
+  const rerunOcr = async () => {
+    if (activeDocument !== documents.length - 1) {
+      setNotice("OCR 재실행은 가장 최근에 추가한 PDF에서 사용할 수 있습니다.");
+      return;
+    }
+    const result = await ocr.rerun();
+    if (!result || activeDocument < 0) return;
+    const next = currentDocuments();
+    next[activeDocument] = result.data;
+    setDocuments(next);
+    form.reset(result.data);
+    setNotice("현재 PDF의 OCR 결과를 다시 반영했습니다.");
+  };
 
   const resetAll = () => {
     ocr.reset();
     form.reset(createEmptyPackingList());
+    setDocuments([]);
+    setDocumentNames([]);
+    setActiveDocument(-1);
     setManagedExcel(null);
     setNotice("");
   };
 
   const saveLocal = () => {
-    localStorage.setItem("packing-list-draft", JSON.stringify(form.getValues()));
+    localStorage.setItem("packing-list-draft", JSON.stringify(currentDocuments()));
     setNotice("브라우저에 임시 저장했습니다.");
   };
 
   const loadSample = () => {
-    form.reset(SAMPLE_DATA);
+    const sample = structuredClone(SAMPLE_DATA);
+    setDocuments([sample]);
+    setDocumentNames(["샘플 패킹리스트"]);
+    setActiveDocument(0);
+    form.reset(sample);
     setNotice("첨부 PDF의 검증 데이터 예시를 불러왔습니다.");
   };
 
   const download = form.handleSubmit(async (data) => {
     try {
-      await excel.exportExcel(data, managedExcel);
+      const next = documents.map((document) => structuredClone(document));
+      if (activeDocument >= 0 && next[activeDocument]) next[activeDocument] = data;
+      if (!next.length) next.push(data);
+      setDocuments(next);
+      await excel.exportExcel(next, managedExcel);
       setNotice(managedExcel
-        ? "기존 Excel의 출고요청서 시트에 새 행을 추가해 다운로드했습니다."
+        ? "기존 Excel에 필요한 AWB 열 블록과 품목 행을 추가해 다운로드했습니다."
         : "Excel 다운로드가 완료되었습니다.");
     } catch {
       setNotice("");
@@ -77,7 +141,7 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-[1800px] space-y-5 p-5">
-        <FileUploader disabled={ocr.isProcessing} onFile={ocr.processFile} />
+        <FileUploader disabled={ocr.isProcessing} onFiles={processFiles} />
         <ExcelUploader
           file={managedExcel}
           disabled={excel.isExporting}
@@ -96,6 +160,34 @@ export default function App() {
         )}
         {notice && (
           <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700"><CheckCircle2 size={18} /> {notice}</div>
+        )}
+
+        {documents.length > 0 && (
+          <section className="rounded-xl border bg-white p-4 shadow-card">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="font-semibold">스캔한 패킹리스트</h2>
+                <p className="text-xs text-slate-500">PDF를 계속 추가한 뒤 각 문서를 선택해 결과를 검수할 수 있습니다.</p>
+              </div>
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{documents.length}건</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {documents.map((document, index) => (
+                <div
+                  key={`${document.awbNo}-${index}`}
+                  className={`inline-flex overflow-hidden rounded-lg border ${activeDocument === index ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-white"}`}
+                >
+                  <button type="button" onClick={() => selectDocument(index)} className="px-3 py-2 text-left text-xs">
+                    <strong className="block text-slate-800">{document.awbNo || `문서 ${index + 1}`}</strong>
+                    <span className="text-slate-500">{documentNames[index] || `${document.items.length}개 품목`}</span>
+                  </button>
+                  <button type="button" aria-label="문서 삭제" onClick={() => removeDocument(index)} className="border-l px-2 text-slate-400 hover:bg-red-50 hover:text-red-600">
+                    <X size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
         )}
 
         <section className="grid gap-5 xl:grid-cols-2">
@@ -130,11 +222,11 @@ export default function App() {
           <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white p-4 shadow-card">
             <p className="max-w-3xl text-xs leading-5 text-slate-500">
               {managedExcel
-                ? "첨부한 기존 Excel의 첫 번째 '출고요청서' 시트에서 AWB 열과 빈 행을 자동 탐색합니다. 빈 행이 없으면 합계 행 위에 새 행을 만들며 다른 시트는 그대로 유지합니다."
+                ? "첨부한 기존 Excel에서 AWB 열 블록과 빈 행을 자동 탐색합니다. AWB가 없으면 새 5열 블록을 만들고, 품목 수만큼 행을 추가하며 다른 시트는 그대로 유지합니다."
                 : "기존 Excel을 첨부하지 않으면 내장된 출고요청서 템플릿을 사용합니다. Flight, Invoice, 중량 값은 템플릿 전용 셀이 없어 화면 검수 데이터로 유지됩니다."}
             </p>
             <div className="flex flex-wrap gap-2">
-              <button type="button" disabled={ocr.isProcessing} onClick={() => void ocr.rerun()} className="inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"><RefreshCcw size={17} /> OCR 재실행</button>
+              <button type="button" disabled={ocr.isProcessing || activeDocument < 0 || activeDocument !== documents.length - 1} onClick={() => void rerunOcr()} className="inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"><RefreshCcw size={17} /> 최근 PDF OCR 재실행</button>
               <button type="button" onClick={resetAll} className="inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-semibold hover:bg-slate-50"><RotateCcw size={17} /> 초기화</button>
               <button type="button" onClick={saveLocal} className="inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-semibold hover:bg-slate-50"><Save size={17} /> 저장</button>
               <DownloadExcelButton managedExcel={Boolean(managedExcel)} loading={excel.isExporting} onClick={() => void download()} />

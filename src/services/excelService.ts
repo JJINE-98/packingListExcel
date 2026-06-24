@@ -377,20 +377,26 @@ function generateFromBundledTemplate(workbook: XLSX.WorkBook, data: PackingListD
   setValue(sheet, excelMapping.totals.totalQty, previousGrandTotal - previousRowTotal + totalQty, "n");
 }
 
-export async function generateShippingWorkbook(data: PackingListData, managedExcel?: File | null): Promise<Blob> {
-  if (managedExcel) return generateManagedWorkbookXml(managedExcel, data);
-  const workbook = await readWorkbook(managedExcel ?? undefined);
+export async function generateShippingWorkbook(documents: PackingListData[], managedExcel?: File | null): Promise<Blob> {
+  let source = managedExcel;
+  if (!source) {
+    const response = await fetch(TEMPLATE_URL);
+    if (!response.ok) throw new Error(`Excel 템플릿을 불러오지 못했습니다. (${response.status})`);
+    source = new File([await response.blob()], "shipping-template.xlsx", { type: MIME_XLSX });
+  }
 
-  generateFromBundledTemplate(workbook, data);
-
-  enableExcelRecalculation(workbook);
-  const output = XLSX.write(workbook, {
-    bookType: "xlsx",
-    type: "array",
-    cellStyles: true,
-    bookSST: true,
-  });
-  return new Blob([output], { type: MIME_XLSX });
+  let output: Blob = source;
+  for (const document of documents) {
+    for (const item of document.items) {
+      const rowData: PackingListData = {
+        ...document,
+        items: [structuredClone(item)],
+      };
+      output = await generateManagedWorkbookXml(source, rowData);
+      source = new File([output], source.name, { type: MIME_XLSX });
+    }
+  }
+  return output;
 }
 
 export function downloadBlob(blob: Blob, fileName: string) {

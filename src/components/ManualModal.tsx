@@ -9,8 +9,8 @@ interface Props {
 const steps = [
   {
     icon: Upload,
-    title: "1. PDF 업로드",
-    description: "패킹리스트 스캔 PDF를 선택하거나 업로드 영역에 끌어다 놓습니다.",
+    title: "1. PDF 여러 개 추가",
+    description: "PDF를 한 번에 여러 개 선택하거나 작업 중 계속 추가할 수 있습니다. 이전 스캔 결과는 지워지지 않고 누적됩니다.",
   },
   {
     icon: ScanText,
@@ -20,12 +20,12 @@ const steps = [
   {
     icon: FileCheck2,
     title: "3. 결과 검수",
-    description: "기본 정보와 상품별 수량을 확인하고 오인식된 값은 표에서 직접 수정합니다.",
+    description: "스캔 목록에서 문서를 선택해 기본 정보와 품목별 수량을 확인하고, 오인식된 값은 표에서 직접 수정합니다.",
   },
   {
     icon: FileDown,
-    title: "4. Excel 행 추가",
-    description: "기존 관리 Excel을 첨부하면 '출고요청서' 시트에 새 행만 추가합니다. 첨부하지 않으면 내장 템플릿을 사용합니다.",
+    title: "4. Excel 열·행 추가",
+    description: "모든 PDF를 한 번에 반영합니다. AWB가 없으면 새 5열 블록을 만들고, 각 패킹리스트의 품목 수만큼 출고 행을 추가합니다.",
   },
 ];
 
@@ -93,8 +93,10 @@ export function ManualModal({ open, onClose }: Props) {
             <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-amber-900/80">
               <li>Date와 AWB NO.는 Excel 생성에 필요한 필수값입니다.</li>
               <li>Size 10, 12, 14, 16, 18 수량과 Total Qty가 일치하는지 확인하세요.</li>
-              <li>여러 상품 행이 있으면 동일 사이즈 수량이 합산되어 템플릿에 입력됩니다.</li>
-              <li>기존 Excel에 빈 행이 없으면 합계 행 바로 위에 동일 스타일의 행을 자동 삽입합니다.</li>
+              <li>한 PDF에 품목이 여러 개면 합산하지 않고 품목마다 별도 출고 행으로 입력합니다.</li>
+              <li>PDF를 추가로 스캔해도 기존 결과는 유지되며, 최종 다운로드 때 모두 순서대로 반영됩니다.</li>
+              <li>기존 Excel에 AWB가 없으면 마지막 AWB 뒤에 Size 10~18의 새 열 블록을 자동 생성합니다.</li>
+              <li>빈 행이 없으면 합계 행 바로 위에 기존 스타일과 수식을 유지한 새 행을 삽입합니다.</li>
               <li>첨부 Excel의 나머지 시트는 데이터를 입력하지 않고 기존 내용을 유지합니다.</li>
               <li>Flight, Invoice, 중량 정보는 템플릿 전용 셀이 없어 검수 화면에만 유지됩니다.</li>
             </ul>
