@@ -24,8 +24,8 @@ const steps = [
   },
   {
     icon: FileDown,
-    title: "4. Excel 다운로드",
-    description: "필수값을 확인한 뒤 Excel 다운로드를 누르면 원본 출고요청서 양식에 데이터가 입력됩니다.",
+    title: "4. Excel 행 추가",
+    description: "기존 관리 Excel을 첨부하면 '출고요청서' 시트에 새 행만 추가합니다. 첨부하지 않으면 내장 템플릿을 사용합니다.",
   },
 ];
 
@@ -94,6 +94,8 @@ export function ManualModal({ open, onClose }: Props) {
               <li>Date와 AWB NO.는 Excel 생성에 필요한 필수값입니다.</li>
               <li>Size 10, 12, 14, 16, 18 수량과 Total Qty가 일치하는지 확인하세요.</li>
               <li>여러 상품 행이 있으면 동일 사이즈 수량이 합산되어 템플릿에 입력됩니다.</li>
+              <li>기존 Excel에 빈 행이 없으면 합계 행 바로 위에 동일 스타일의 행을 자동 삽입합니다.</li>
+              <li>첨부 Excel의 나머지 시트는 데이터를 입력하지 않고 기존 내용을 유지합니다.</li>
               <li>Flight, Invoice, 중량 정보는 템플릿 전용 셀이 없어 검수 화면에만 유지됩니다.</li>
             </ul>
           </div>

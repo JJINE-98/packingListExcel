@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { DownloadExcelButton } from "./components/DownloadExcelButton";
 import { ExtractedDataTable } from "./components/ExtractedDataTable";
+import { ExcelUploader } from "./components/ExcelUploader";
 import { FileUploader } from "./components/FileUploader";
 import { ManualModal } from "./components/ManualModal";
 import { OcrPreview } from "./components/OcrPreview";
@@ -20,6 +21,7 @@ export default function App() {
   const form = useForm<PackingListData>({ defaultValues: createEmptyPackingList() });
   const [notice, setNotice] = useState("");
   const [manualOpen, setManualOpen] = useState(false);
+  const [managedExcel, setManagedExcel] = useState<File | null>(null);
 
   useEffect(() => {
     if (ocr.result) form.reset(ocr.result.data);
@@ -28,6 +30,7 @@ export default function App() {
   const resetAll = () => {
     ocr.reset();
     form.reset(createEmptyPackingList());
+    setManagedExcel(null);
     setNotice("");
   };
 
@@ -43,8 +46,10 @@ export default function App() {
 
   const download = form.handleSubmit(async (data) => {
     try {
-      await excel.exportExcel(data);
-      setNotice("Excel 다운로드가 완료되었습니다.");
+      await excel.exportExcel(data, managedExcel);
+      setNotice(managedExcel
+        ? "기존 Excel의 출고요청서 시트에 새 행을 추가해 다운로드했습니다."
+        : "Excel 다운로드가 완료되었습니다.");
     } catch {
       setNotice("");
     }
@@ -73,6 +78,11 @@ export default function App() {
 
       <main className="mx-auto max-w-[1800px] space-y-5 p-5">
         <FileUploader disabled={ocr.isProcessing} onFile={ocr.processFile} />
+        <ExcelUploader
+          file={managedExcel}
+          disabled={excel.isExporting}
+          onFile={setManagedExcel}
+        />
 
         {(ocr.progress || ocr.isProcessing) && (
           <section className="rounded-xl border bg-white p-4 shadow-card">
@@ -119,13 +129,15 @@ export default function App() {
 
           <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white p-4 shadow-card">
             <p className="max-w-3xl text-xs leading-5 text-slate-500">
-              첨부 Excel의 실제 `출고요청서` 시트 27행과 BH:BL 사이즈 블록에 기록합니다. 템플릿에 전용 셀이 없는 Flight, Invoice, 중량 값은 화면 검수 데이터로 유지됩니다.
+              {managedExcel
+                ? "첨부한 기존 Excel의 첫 번째 '출고요청서' 시트에서 AWB 열과 빈 행을 자동 탐색합니다. 빈 행이 없으면 합계 행 위에 새 행을 만들며 다른 시트는 그대로 유지합니다."
+                : "기존 Excel을 첨부하지 않으면 내장된 출고요청서 템플릿을 사용합니다. Flight, Invoice, 중량 값은 템플릿 전용 셀이 없어 화면 검수 데이터로 유지됩니다."}
             </p>
             <div className="flex flex-wrap gap-2">
               <button type="button" disabled={ocr.isProcessing} onClick={() => void ocr.rerun()} className="inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"><RefreshCcw size={17} /> OCR 재실행</button>
               <button type="button" onClick={resetAll} className="inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-semibold hover:bg-slate-50"><RotateCcw size={17} /> 초기화</button>
               <button type="button" onClick={saveLocal} className="inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-semibold hover:bg-slate-50"><Save size={17} /> 저장</button>
-              <DownloadExcelButton loading={excel.isExporting} onClick={() => void download()} />
+              <DownloadExcelButton managedExcel={Boolean(managedExcel)} loading={excel.isExporting} onClick={() => void download()} />
             </div>
           </section>
         </form>
