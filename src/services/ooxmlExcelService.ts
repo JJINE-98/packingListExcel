@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
+import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
 import type { PackingListData } from "../types/packingList";
 import { excelSerialFromDate, normalizeAwb } from "../utils/excelUtils";
 
@@ -229,25 +230,42 @@ function adjustFormulaReferences(value: string, insertionRow: number) {
 }
 
 function shiftRows(xml: string, insertionRow: number) {
-  let shifted = xml.replace(
-    /<row\b[^>]*\br="(\d+)"[^>]*>[\s\S]*?<\/row>/g,
-    (rowXml, rowText: string) => {
-      const row = Number(rowText);
-      if (row < insertionRow) return rowXml;
-      return rowXml
-        .replace(/\br="\d+"/, `r="${row + 1}"`)
-        .replace(/\br="([A-Z]+)(\d+)"/g, (_match: string, column: string, cellRow: string) =>
-          `r="${column}${Number(cellRow) + 1}"`,
-        );
-    },
-  );
-  shifted = shifted.replace(/<f([^>]*)>([\s\S]*?)<\/f>/g, (_match, attributes, formula) =>
-    `<f${attributes}>${adjustFormulaReferences(formula, insertionRow)}</f>`,
-  );
-  shifted = shifted.replace(/\b(ref|sqref)="([^"]+)"/g, (_match, attribute, ref) =>
-    `${attribute}="${adjustFormulaReferences(ref, insertionRow)}"`,
-  );
-  return shifted;
+  const document = new DOMParser().parseFromString(xml, "application/xml");
+  const rows = Array.from(document.getElementsByTagNameNS(MAIN_NS, "row"));
+  for (const rowElement of rows) {
+    const row = Number(rowElement.getAttribute("r"));
+    if (row < insertionRow) continue;
+    const nextRow = row + 1;
+    rowElement.setAttribute("r", String(nextRow));
+    const cells = Array.from(rowElement.getElementsByTagNameNS(MAIN_NS, "c"));
+    for (const cell of cells) {
+      const address = cell.getAttribute("r");
+      if (!address) continue;
+      const column = address.match(/^[A-Z]+/)?.[0];
+      if (column) cell.setAttribute("r", `${column}${nextRow}`);
+    }
+  }
+
+  const formulas = Array.from(document.getElementsByTagNameNS(MAIN_NS, "f"));
+  for (const formula of formulas) {
+    const formulaText = formula.textContent;
+    if (formulaText) {
+      const adjusted = adjustFormulaReferences(formulaText, insertionRow);
+      while (formula.firstChild) formula.removeChild(formula.firstChild);
+      formula.appendChild(document.createTextNode(adjusted));
+    }
+    const sharedRange = formula.getAttribute("ref");
+    if (sharedRange) formula.setAttribute("ref", adjustFormulaReferences(sharedRange, insertionRow));
+  }
+
+  for (const element of Array.from(document.getElementsByTagName("*"))) {
+    for (const attribute of ["ref", "sqref"]) {
+      if (element.localName === "f" && attribute === "ref") continue;
+      const value = element.getAttribute(attribute);
+      if (value) element.setAttribute(attribute, adjustFormulaReferences(value, insertionRow));
+    }
+  }
+  return new XMLSerializer().serializeToString(document);
 }
 
 function upsertCell(rowXml: string, address: string, value: string | number, fallbackStyle?: string) {
@@ -348,6 +366,66 @@ function populateRow(
   return result;
 }
 
+function getAddedColumnValues(layout: DynamicLayout, data: PackingListData) {
+  const aggregated = aggregateData(data);
+  const quantitySum = Object.values(aggregated.quantities).reduce((sum, value) => sum + value, 0);
+  const additions = new Map<string, number>();
+
+  for (const size of ["10", "12", "14", "16", "18"] as const) {
+    const column = layout.sizeColumns[size];
+    const value = aggregated.quantities[size];
+    if (column && value) additions.set(XLSX.utils.encode_col(column - 1), value);
+  }
+
+  const totalQuantity = aggregated.totalQuantity || quantitySum;
+  if (totalQuantity) {
+    additions.set(XLSX.utils.encode_col(layout.totalColumn - 1), totalQuantity);
+  }
+  return additions;
+}
+
+function addToCachedCellValue(
+  document: ReturnType<DOMParser["parseFromString"]>,
+  row: number,
+  column: string,
+  delta: number,
+  requireFormula = false,
+) {
+  const address = `${column}${row}`;
+  const cells = Array.from(document.getElementsByTagNameNS(MAIN_NS, "c"));
+  const cell = cells.find((candidate) => candidate.getAttribute("r") === address);
+  if (!cell || requireFormula && !cell.getElementsByTagNameNS(MAIN_NS, "f").length) return;
+
+  let valueElement = cell.getElementsByTagNameNS(MAIN_NS, "v")[0];
+  if (!valueElement) {
+    valueElement = document.createElementNS(MAIN_NS, "v");
+    cell.appendChild(valueElement);
+  }
+  const currentValue = Number(valueElement.textContent || 0);
+  const nextValue = (Number.isFinite(currentValue) ? currentValue : 0) + delta;
+  while (valueElement.firstChild) valueElement.removeChild(valueElement.firstChild);
+  valueElement.appendChild(document.createTextNode(String(nextValue)));
+}
+
+function updateCachedTotals(
+  xml: string,
+  summaryRow: number,
+  layout: DynamicLayout,
+  data: PackingListData,
+) {
+  const document = new DOMParser().parseFromString(xml, "application/xml");
+  const additions = getAddedColumnValues(layout, data);
+
+  for (const [column, delta] of additions) {
+    // 입고 합계 행과 그 아래 잔량 행의 저장된 계산값도 함께 갱신한다.
+    // 브라우저/미리보기처럼 수식을 즉시 재계산하지 않는 환경에서도 올바른 값이 보인다.
+    addToCachedCellValue(document, summaryRow, column, delta);
+    addToCachedCellValue(document, summaryRow + 2, column, delta, true);
+  }
+
+  return new XMLSerializer().serializeToString(document);
+}
+
 function resolveFirstSheetPath(workbookXml: string, relationshipsXml: string) {
   const firstSheet = workbookXml.match(/<sheet\b[^>]*\bname="출고요청서"[^>]*\br:id="([^"]+)"/);
   if (!firstSheet) throw new Error("workbook.xml에서 출고요청서 시트를 찾을 수 없습니다.");
@@ -417,6 +495,8 @@ export async function generateManagedWorkbookXml(file: File, data: PackingListDa
 
   const currentRow = getRowXml(sheetXml, targetRow);
   sheetXml = sheetXml.replace(currentRow, populateRow(currentRow, targetRow, layout, data, columnStyles));
+  const outputSummaryRow = layout.summaryRow + (insertRow ? 1 : 0);
+  sheetXml = updateCachedTotals(sheetXml, outputSummaryRow, layout, data);
   zip.file(sheetPath, sheetXml);
   zip.file("xl/workbook.xml", enableWorkbookRecalculation(workbookXml));
   removeCalcChain(zip);
