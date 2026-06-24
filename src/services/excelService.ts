@@ -134,6 +134,39 @@ function cloneCell(cell: XLSX.CellObject | undefined) {
   return structuredClone(cell);
 }
 
+function applyDataRowStyle(
+  sheet: XLSX.WorkSheet,
+  targetRow: number,
+  range: XLSX.Range,
+  dataStartRow: number,
+) {
+  for (let column = range.s.c + 1; column <= range.e.c + 1; column += 1) {
+    const address = XLSX.utils.encode_cell({ r: targetRow - 1, c: column - 1 });
+    const target = sheet[address];
+    if (target?.s !== undefined) continue;
+
+    for (let row = targetRow - 1; row >= dataStartRow; row -= 1) {
+      const source = sheet[XLSX.utils.encode_cell({ r: row - 1, c: column - 1 })];
+      if (!source) continue;
+      const styled = cloneCell(source)!;
+      delete styled.v;
+      delete styled.w;
+      delete styled.f;
+      delete styled.h;
+      delete styled.l;
+      delete styled.c;
+      styled.t = "z";
+      sheet[address] = { ...styled, ...target };
+      break;
+    }
+  }
+  if (sheet["!rows"] && !sheet["!rows"]![targetRow - 1]) {
+    sheet["!rows"]![targetRow - 1] = structuredClone(
+      sheet["!rows"]![Math.max(dataStartRow, targetRow - 1) - 1] ?? {},
+    );
+  }
+}
+
 function adjustMovedFormula(formula: string, insertionRow: number) {
   return formula.replace(
     /(\$?[A-Z]{1,3}\$?)(\d+)(?::(\$?[A-Z]{1,3}\$?)(\d+))?/g,
@@ -244,7 +277,10 @@ function analyzeDynamicLayout(sheet: XLSX.WorkSheet, awbNo: string): DynamicLayo
 function findOrCreateDataRow(sheet: XLSX.WorkSheet, layout: DynamicLayout) {
   const range = XLSX.utils.decode_range(sheet["!ref"] ?? "A1");
   for (let row = layout.dataStartRow; row < layout.summaryRow; row += 1) {
-    if (isRowEmpty(sheet, row, range)) return row;
+    if (isRowEmpty(sheet, row, range)) {
+      applyDataRowStyle(sheet, row, range, layout.dataStartRow);
+      return row;
+    }
   }
   insertWorksheetRow(sheet, layout.summaryRow, range, layout.dataStartRow);
   return layout.summaryRow;
@@ -294,6 +330,7 @@ async function readWorkbook(file?: File) {
       cellStyles: true,
       cellDates: true,
       cellFormula: true,
+      sheetStubs: true,
     });
   }
   const response = await fetch(TEMPLATE_URL);
@@ -303,6 +340,7 @@ async function readWorkbook(file?: File) {
     cellStyles: true,
     cellDates: true,
     cellFormula: true,
+    sheetStubs: true,
   });
 }
 
