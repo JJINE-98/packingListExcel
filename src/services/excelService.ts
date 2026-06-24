@@ -2,6 +2,7 @@ import * as XLSX from "xlsx";
 import { excelMapping } from "../config/excelMapping";
 import type { PackingListData } from "../types/packingList";
 import { excelSerialFromDate, normalizeAwb } from "../utils/excelUtils";
+import { generateManagedWorkbookXml } from "./ooxmlExcelService";
 
 const TEMPLATE_URL = `${import.meta.env.BASE_URL}templates/shipping-template.xlsx`;
 const TARGET_SHEET = "출고요청서";
@@ -377,19 +378,10 @@ function generateFromBundledTemplate(workbook: XLSX.WorkBook, data: PackingListD
 }
 
 export async function generateShippingWorkbook(data: PackingListData, managedExcel?: File | null): Promise<Blob> {
+  if (managedExcel) return generateManagedWorkbookXml(managedExcel, data);
   const workbook = await readWorkbook(managedExcel ?? undefined);
 
-  if (managedExcel) {
-    if (workbook.SheetNames[0] !== TARGET_SHEET || !workbook.Sheets[TARGET_SHEET]) {
-      throw new Error(`첨부 Excel의 첫 번째 시트 이름이 '${TARGET_SHEET}'이어야 합니다.`);
-    }
-    const sheet = workbook.Sheets[TARGET_SHEET];
-    const layout = analyzeDynamicLayout(sheet, data.awbNo);
-    const targetRow = findOrCreateDataRow(sheet, layout);
-    populateDynamicRow(sheet, targetRow, layout, data);
-  } else {
-    generateFromBundledTemplate(workbook, data);
-  }
+  generateFromBundledTemplate(workbook, data);
 
   enableExcelRecalculation(workbook);
   const output = XLSX.write(workbook, {

@@ -103,6 +103,31 @@ export function extractPackingList(rawText: string): PackingListData {
 
   const quantitySum = Object.values(item.quantities).reduce<number>((sum, value) => sum + (value === "" ? 0 : value), 0);
   if (item.totalQuantity === "" && quantitySum > 0) item.totalQuantity = quantitySum;
+  if (item.totalQuantity !== "") {
+    const prefixCorrections = SIZE_KEYS.flatMap((size) => {
+      const current = item.quantities[size];
+      if (current === "") return [];
+      const otherSum = SIZE_KEYS.reduce(
+        (sum, otherSize) => sum + (otherSize === size || item.quantities[otherSize] === "" ? 0 : Number(item.quantities[otherSize])),
+        0,
+      );
+      const expected = Number(item.totalQuantity) - otherSum;
+      return expected > Number(current) &&
+        String(expected).startsWith(String(current)) &&
+        String(expected).length === String(current).length + 1
+        ? [{ size, expected }]
+        : [];
+    });
+    const correction = prefixCorrections.length === 1
+      ? prefixCorrections[0]
+      : prefixCorrections.length > 1 &&
+          prefixCorrections.every((candidate) => candidate.expected === prefixCorrections[0].expected)
+        ? prefixCorrections.sort((first, second) => Number(second.size) - Number(first.size))[0]
+        : undefined;
+    if (correction) {
+      item.quantities[correction.size] = correction.expected;
+    }
+  }
   if (item.sizeKg !== "" && item.netWeight === "" && item.totalQuantity !== "") {
     item.netWeight = item.sizeKg * item.totalQuantity;
   }
