@@ -523,7 +523,7 @@ function insertAwbBlock(
   const awbAddress = `${XLSX.utils.encode_col(targetStart - 1)}${awbHeaderRow}`;
   const productAddress = `${XLSX.utils.encode_col(targetStart - 1)}${productHeaderRow}`;
   for (const [row, address, value] of [
-    [awbHeaderRow, awbAddress, data.awbNo.trim()],
+    [awbHeaderRow, awbAddress, normalizeAwb(data.awbNo)],
     [productHeaderRow, productAddress, null],
   ] as const) {
     const rowXml = getRowXml(shifted, row);

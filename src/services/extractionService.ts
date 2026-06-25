@@ -1,6 +1,6 @@
 import { createEmptyItem, createEmptyPackingList } from "../config/packingListFields";
 import { SIZE_KEYS, type PackingListData, type SizeKey } from "../types/packingList";
-import { normalizeDateInput } from "../utils/excelUtils";
+import { normalizeAwb, normalizeDateInput } from "../utils/excelUtils";
 
 const firstMatch = (text: string, patterns: RegExp[]) => {
   for (const pattern of patterns) {
@@ -59,7 +59,10 @@ export function extractPackingList(rawText: string): PackingListData {
     lineValue(text, /^Ship\s*To\b/i),
   );
   data.shipBy = firstMatch(text, [/Ship[ \t]*By[ \t]*[:.]?[ \t]*([A-Za-z]+)/i]) || "AIR";
-  data.awbNo = firstMatch(text, [/AWB\s*NO\.?\s*[:.]?\s*([0-9 -]{11,16})/i, /\b(618\s*-\s*\d{4}\s+\d{4})\b/]);
+  data.awbNo = normalizeAwb(firstMatch(text, [
+    /AWB\s*NO\.?\s*[:.]?\s*([0-9 -]{11,16})/i,
+    /\b(618\s*-\s*\d{4}[\s-]+\d{4})\b/,
+  ]));
 
   const structuredCustomer = cleanCountry(structuredValue(text, "CUSTOMER"));
   item.customer = structuredCustomer || cleanCountry(data.destination);

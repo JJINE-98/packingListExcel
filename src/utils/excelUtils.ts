@@ -24,7 +24,11 @@ export function normalizeDateInput(value: string) {
   return `${year}-${month}-${day}`;
 }
 
-export const normalizeAwb = (awb: string) =>
-  awb.replace(/[^\d]/g, "").replace(/^(\d{3})(\d{4})(\d{4})$/, "$1-$2-$3");
+export const normalizeAwb = (awb: string) => {
+  const digits = awb.replace(/[^\d]/g, "");
+  // OCR이 AWB 앞의 표 선 등을 숫자 1로 잘못 읽는 경우 실제 618 운송장 번호만 사용한다.
+  const awbDigits = digits.match(/618\d{8}/)?.[0] ?? digits;
+  return awbDigits.replace(/^(\d{3})(\d{4})(\d{4})$/, "$1-$2-$3");
+};
 
 export const numericOrBlank = (value: number | "") => value === "" ? undefined : Number(value);
