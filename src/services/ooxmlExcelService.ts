@@ -260,7 +260,7 @@ function emptyStyledCell(cellXml: string, address: string) {
   return `<c r="${address}"${style ? ` s="${style}"` : ""}/>`;
 }
 
-function clearSharedStringCells(
+function clearRowsFromSharedString(
   sheetXml: string,
   sharedStringsXml: string,
   targetText: string,
@@ -273,14 +273,19 @@ function clearSharedStringCells(
   });
   if (!targetIndexes.size) return sheetXml;
 
+  const startRows = [...sheetXml.matchAll(
+    /<c\b[^>]*\br="([A-Z]+)(\d+)"[^>]*\bt="s"[^>]*>[\s\S]*?<v>(\d+)<\/v>[\s\S]*?<\/c>/g,
+  )]
+    .filter((match) => targetIndexes.has(match[3]))
+    .map((match) => Number(match[2]));
+  if (!startRows.length) return sheetXml;
+  const startRow = Math.min(...startRows);
+
   return sheetXml.replace(
     /<c\b[^>]*\br="([A-Z]+\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g,
     (cellXml, address: string) => {
-      if (!/\bt="s"/.test(cellXml)) return cellXml;
-      const sharedStringIndex = cellXml.match(/<v>(\d+)<\/v>/)?.[1];
-      return sharedStringIndex && targetIndexes.has(sharedStringIndex)
-        ? emptyStyledCell(cellXml, address)
-        : cellXml;
+      const row = Number(address.replace(/\D/g, ""));
+      return row >= startRow ? emptyStyledCell(cellXml, address) : cellXml;
     },
   );
 }
@@ -923,7 +928,7 @@ export async function generateManagedWorkbookXml(
   if (options.blankQuarantineLoss) {
     const sharedStringsXml = await zip.file("xl/sharedStrings.xml")?.async("string");
     if (sharedStringsXml) {
-      sheetXml = clearSharedStringCells(sheetXml, sharedStringsXml, "검역로스");
+      sheetXml = clearRowsFromSharedString(sheetXml, sharedStringsXml, "검역로스");
     }
   }
   zip.file(sheetPath, sheetXml);
