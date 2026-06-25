@@ -5,7 +5,6 @@ import {
   Database,
   RefreshCcw,
   RotateCcw,
-  Save,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -40,6 +39,8 @@ export default function App() {
   const [documentPageUrls, setDocumentPageUrls] = useState<string[][]>([]);
   const [activeDocument, setActiveDocument] = useState(-1);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [leftPanelHeight, setLeftPanelHeight] = useState<number>();
+  const leftPanelRef = useRef<HTMLDivElement>(null);
   const pageUrlsRef = useRef<string[][]>([]);
 
   useEffect(() => {
@@ -67,6 +68,16 @@ export default function App() {
   useEffect(() => {
     if (excel.error) showToast(excel.error, "error");
   }, [excel.error, showToast]);
+
+  useEffect(() => {
+    const element = leftPanelRef.current;
+    if (!element) return;
+    const updateHeight = () => setLeftPanelHeight(element.getBoundingClientRect().height);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   const currentDocuments = () => {
     const next = documents.map((document) => structuredClone(document));
@@ -139,11 +150,6 @@ export default function App() {
     setToast(null);
   };
 
-  const saveLocal = () => {
-    localStorage.setItem("packing-list-draft", JSON.stringify(currentDocuments()));
-    showToast("브라우저에 임시 저장했습니다.");
-  };
-
   const loadSample = () => {
     ocr.releasePageUrls(documentPageUrls.flat());
     const sample = structuredClone(SAMPLE_DATA);
@@ -201,7 +207,7 @@ export default function App() {
 
         <form className="space-y-5" onSubmit={download}>
           <section className="grid gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(480px,0.92fr)]">
-            <div className="space-y-5">
+            <div ref={leftPanelRef} className="space-y-5">
               <section className="rounded-2xl border bg-white p-4 shadow-card">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -239,12 +245,9 @@ export default function App() {
                     <h2 className="font-semibold">패킹리스트 정보</h2>
                     <p className="text-xs text-slate-500">Excel에 반영되는 날짜와 AWB를 확인하세요.</p>
                   </div>
-                  <div className="flex gap-2">
+                  <div>
                     <button type="button" disabled={ocr.isProcessing || activeDocument < 0 || activeDocument !== documents.length - 1} onClick={() => void rerunOcr()} className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold hover:bg-slate-50 disabled:opacity-40">
                       <RefreshCcw size={15} /> OCR 재실행
-                    </button>
-                    <button type="button" onClick={saveLocal} className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold hover:bg-slate-50">
-                      <Save size={15} /> 임시 저장
                     </button>
                   </div>
                 </div>
@@ -263,7 +266,10 @@ export default function App() {
               <ExtractedDataTable form={form} />
             </div>
 
-            <section className="flex h-full min-h-0 flex-col rounded-2xl border bg-white p-4 shadow-card">
+            <section
+              className="flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-white p-4 shadow-card"
+              style={leftPanelHeight ? { height: leftPanelHeight } : undefined}
+            >
               <div className="mb-3">
                 <h2 className="font-semibold">PDF 미리보기</h2>
                 <p className="text-xs text-slate-500">{activeDocument >= 0 ? documentNames[activeDocument] : "선택된 문서가 없습니다."}</p>

@@ -12,7 +12,6 @@ interface AggregatedPackingList {
   quantities: Record<"10" | "12" | "14" | "16" | "18", number>;
   totalQuantity: number;
   products: string[];
-  remarks: string[];
 }
 
 interface DynamicLayout {
@@ -38,13 +37,11 @@ function aggregateData(data: PackingListData): AggregatedPackingList {
     result.totalQuantity += Number(current.totalQuantity || 0);
     const label = [current.variety, current.grade].filter(Boolean).join(" ") || current.productName;
     if (label && !result.products.includes(label)) result.products.push(label);
-    if (current.remarks && !result.remarks.includes(current.remarks)) result.remarks.push(current.remarks);
     return result;
   }, {
     quantities: { "10": 0, "12": 0, "14": 0, "16": 0, "18": 0 },
     totalQuantity: 0,
     products: [],
-    remarks: [],
   });
 }
 
@@ -292,13 +289,12 @@ function populateDynamicRow(sheet: XLSX.WorkSheet, row: number, layout: DynamicL
   const aggregated = aggregateData(data);
   const quantitySum = Object.values(aggregated.quantities).reduce((sum, value) => sum + value, 0);
   const totalQuantity = aggregated.totalQuantity || quantitySum;
-  const remarks = aggregated.remarks.join(" / ");
   const awb = normalizeAwb(data.awbNo);
   const dateValue = excelSerialFromDate(data.date);
 
   setValue(sheet, `C${row}`, dateValue, typeof dateValue === "number" ? "n" : "s");
   if (typeof dateValue === "number") sheet[`C${row}`].z = "mm\"월\"dd\"일\"";
-  setValue(sheet, `D${row}`, `${awb}(${totalQuantity}ct)${remarks}`.trim());
+  setValue(sheet, `D${row}`, `${awb}(${totalQuantity}ct)`);
 
   for (const size of ["10", "12", "14", "16", "18"] as const) {
     const column = layout.sizeColumns[size];
@@ -307,9 +303,6 @@ function populateDynamicRow(sheet: XLSX.WorkSheet, row: number, layout: DynamicL
     }
   }
   setValue(sheet, XLSX.utils.encode_cell({ r: row - 1, c: layout.totalColumn - 1 }), totalQuantity, "n");
-  if (layout.remarksColumn) {
-    setValue(sheet, XLSX.utils.encode_cell({ r: row - 1, c: layout.remarksColumn - 1 }), remarks);
-  }
 }
 
 function enableExcelRecalculation(workbook: XLSX.WorkBook) {
@@ -352,7 +345,6 @@ function generateFromBundledTemplate(workbook: XLSX.WorkBook, data: PackingListD
   const aggregated = aggregateData(data);
   const sizeTotal = Object.values(aggregated.quantities).reduce((sum, value) => sum + value, 0);
   const totalQty = aggregated.totalQuantity || sizeTotal;
-  const remarks = aggregated.remarks.join(" / ");
   const awb = normalizeAwb(data.awbNo);
   const previousRowTotal = Number(sheet[excelMapping.totalQty]?.v || 0);
   const previousGrandTotal = Number(sheet[excelMapping.totals.totalQty]?.v || 0);
@@ -360,7 +352,7 @@ function generateFromBundledTemplate(workbook: XLSX.WorkBook, data: PackingListD
 
   setValue(sheet, excelMapping.date, dateValue, typeof dateValue === "number" ? "n" : "s");
   if (typeof dateValue === "number") sheet[excelMapping.date].z = "mm\"월\"dd\"일\"";
-  setValue(sheet, excelMapping.awbDescription, `${awb}(${totalQty}ct)${remarks}`.trim());
+  setValue(sheet, excelMapping.awbDescription, `${awb}(${totalQty}ct)`);
   setValue(sheet, excelMapping.awbHeader, data.awbNo.trim() || awb);
   setValue(sheet, excelMapping.productHeader, aggregated.products.join(" / "));
   setValue(sheet, excelMapping.size10, aggregated.quantities["10"], "n");
@@ -369,7 +361,6 @@ function generateFromBundledTemplate(workbook: XLSX.WorkBook, data: PackingListD
   setValue(sheet, excelMapping.size16, aggregated.quantities["16"], "n");
   setValue(sheet, excelMapping.size18, aggregated.quantities["18"], "n");
   setValue(sheet, excelMapping.totalQty, totalQty, "n");
-  setValue(sheet, excelMapping.remarks, remarks);
   setValue(sheet, excelMapping.totals.size10, aggregated.quantities["10"], "n");
   setValue(sheet, excelMapping.totals.size12, aggregated.quantities["12"], "n");
   setValue(sheet, excelMapping.totals.size14, aggregated.quantities["14"], "n");
@@ -405,6 +396,11 @@ export function downloadBlob(blob: Blob, fileName: string) {
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = fileName;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
   anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setTimeout(() => {
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }, 3000);
 }

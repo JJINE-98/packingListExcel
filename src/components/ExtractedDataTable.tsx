@@ -121,11 +121,6 @@ export function ExtractedDataTable({ form }: Props) {
             </div>
           </div>
 
-          <label className="block text-xs font-semibold text-slate-600">
-            Remarks
-            <input className={inputClass} {...register(`items.${activeItem}.remarks`)} />
-          </label>
-
           <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
             <button type="button" onClick={copyItem} className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
               <Copy size={16} /> 상품 복사

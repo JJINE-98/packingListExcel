@@ -105,8 +105,7 @@ export function ManualModal({ open, onClose }: Props) {
           <div className="rounded-xl border border-slate-200 p-4">
             <h3 className="font-semibold text-slate-900">편집 기능</h3>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              행 추가, 행 복사, 행 삭제, 행 초기화와 OCR 재실행을 사용할 수 있습니다.
-              저장 버튼은 현재 입력 내용을 이 브라우저에 임시 저장합니다.
+              상품 추가, 상품 복사, 상품 삭제, 상품 초기화와 OCR 재실행을 사용할 수 있습니다.
             </p>
           </div>
         </div>

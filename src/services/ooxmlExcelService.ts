@@ -29,7 +29,6 @@ interface AwbBlockInsertion {
 interface AggregatedPackingList {
   quantities: Record<"10" | "12" | "14" | "16" | "18", number>;
   totalQuantity: number;
-  remarks: string[];
 }
 
 function aggregateData(data: PackingListData): AggregatedPackingList {
@@ -38,12 +37,10 @@ function aggregateData(data: PackingListData): AggregatedPackingList {
       result.quantities[size] += Number(current.quantities[size] || 0);
     }
     result.totalQuantity += Number(current.totalQuantity || 0);
-    if (current.remarks && !result.remarks.includes(current.remarks)) result.remarks.push(current.remarks);
     return result;
   }, {
     quantities: { "10": 0, "12": 0, "14": 0, "16": 0, "18": 0 },
     totalQuantity: 0,
-    remarks: [],
   });
 }
 
@@ -594,11 +591,10 @@ function populateRow(
   const aggregated = aggregateData(data);
   const quantitySum = Object.values(aggregated.quantities).reduce((sum, value) => sum + value, 0);
   const totalQuantity = aggregated.totalQuantity || quantitySum;
-  const remarks = aggregated.remarks.join(" / ");
   const awb = normalizeAwb(data.awbNo);
   const date = excelSerialFromDate(data.date);
   let result = upsertCell(rowXml, `C${row}`, date, columnStyles.get("C"));
-  result = upsertCell(result, `D${row}`, `${awb}(${totalQuantity}ct)${remarks}`.trim(), columnStyles.get("D"));
+  result = upsertCell(result, `D${row}`, `${awb}(${totalQuantity}ct)`, columnStyles.get("D"));
   for (const size of ["10", "12", "14", "16", "18"] as const) {
     const column = layout.sizeColumns[size];
     if (column) {
@@ -608,10 +604,6 @@ function populateRow(
   }
   const totalColumnName = XLSX.utils.encode_col(layout.totalColumn - 1);
   result = upsertCell(result, `${totalColumnName}${row}`, totalQuantity, columnStyles.get(totalColumnName));
-  if (layout.remarksColumn) {
-    const remarksColumnName = XLSX.utils.encode_col(layout.remarksColumn - 1);
-    result = upsertCell(result, `${remarksColumnName}${row}`, remarks, columnStyles.get(remarksColumnName));
-  }
   return result;
 }
 
