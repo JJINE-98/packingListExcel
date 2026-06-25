@@ -122,8 +122,9 @@ function findLabeledColumn(sheet: XLSX.WorkSheet, headerRow: number, range: XLSX
   return undefined;
 }
 
-function isRowEmpty(sheet: XLSX.WorkSheet, row: number, range: XLSX.Range) {
-  for (let column = range.s.c + 1; column <= range.e.c + 1; column += 1) {
+function isRowEmpty(sheet: XLSX.WorkSheet, row: number) {
+  // A열의 순번은 무시하고 실제 출고 데이터가 기록되는 B:D만 확인한다.
+  for (let column = 2; column <= 4; column += 1) {
     const cell = sheet[XLSX.utils.encode_cell({ r: row - 1, c: column - 1 })];
     if (cell && (cell.v !== undefined && cell.v !== null && cell.v !== "" || cell.f)) return false;
   }
@@ -278,7 +279,7 @@ function analyzeDynamicLayout(sheet: XLSX.WorkSheet, awbNo: string): DynamicLayo
 function findOrCreateDataRow(sheet: XLSX.WorkSheet, layout: DynamicLayout) {
   const range = XLSX.utils.decode_range(sheet["!ref"] ?? "A1");
   for (let row = layout.dataStartRow; row < layout.summaryRow; row += 1) {
-    if (isRowEmpty(sheet, row, range)) {
+    if (isRowEmpty(sheet, row)) {
       applyDataRowStyle(sheet, row, range, layout.dataStartRow);
       return row;
     }

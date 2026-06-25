@@ -132,8 +132,10 @@ function findReusableAwbBlock(sheet: XLSX.WorkSheet, headerRow: number, beforeCo
   throw new Error("새 AWB 열을 만들기 위한 상품 사이즈 블록을 찾을 수 없습니다.");
 }
 
-function isRowEmpty(sheet: XLSX.WorkSheet, row: number, range: XLSX.Range) {
-  for (let column = range.s.c + 1; column <= range.e.c + 1; column += 1) {
+function isRowEmpty(sheet: XLSX.WorkSheet, row: number) {
+  // A열은 순번 등 고정값이 들어 있을 수 있다.
+  // 실제 출고 데이터 영역인 B:D가 모두 비어 있으면 재사용 가능한 행으로 본다.
+  for (let column = 2; column <= 4; column += 1) {
     const cell = sheet[XLSX.utils.encode_cell({ r: row - 1, c: column - 1 })];
     if (cell && (cell.v !== undefined && cell.v !== null && cell.v !== "" || cell.f)) return false;
   }
@@ -184,7 +186,7 @@ function analyzeLayout(workbook: XLSX.WorkBook, awbNo: string) {
   let targetRow = summaryRow;
   let insertRow = true;
   for (let row = dataStartRow; row < summaryRow; row += 1) {
-    if (isRowEmpty(sheet, row, range)) {
+    if (isRowEmpty(sheet, row)) {
       targetRow = row;
       insertRow = false;
       break;

@@ -200,7 +200,7 @@ export default function App() {
         )}
 
         <form className="space-y-5" onSubmit={download}>
-          <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(480px,0.92fr)]">
+          <section className="grid gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(480px,0.92fr)]">
             <div className="space-y-5">
               <section className="rounded-2xl border bg-white p-4 shadow-card">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -263,12 +263,14 @@ export default function App() {
               <ExtractedDataTable form={form} />
             </div>
 
-            <section className="rounded-2xl border bg-white p-4 shadow-card xl:sticky xl:top-5">
+            <section className="flex h-full min-h-0 flex-col rounded-2xl border bg-white p-4 shadow-card">
               <div className="mb-3">
                 <h2 className="font-semibold">PDF 미리보기</h2>
                 <p className="text-xs text-slate-500">{activeDocument >= 0 ? documentNames[activeDocument] : "선택된 문서가 없습니다."}</p>
               </div>
-              <PdfPreview pageUrls={activePageUrls} />
+              <div className="min-h-0 flex-1">
+                <PdfPreview pageUrls={activePageUrls} />
+              </div>
             </section>
           </section>
 
