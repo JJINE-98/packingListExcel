@@ -117,8 +117,19 @@ function findReusableAwbBlock(sheet: XLSX.WorkSheet, headerRow: number, beforeCo
     const sizes = Array.from({ length: 5 }, (_, offset) => Number(cellText(sheet, headerRow, column + offset)));
     if (sizes.join(",") === "10,12,14,16,18") reusable = column;
   }
-  if (!reusable) throw new Error("새 AWB 열을 만들기 위한 기존 10~18 사이즈 블록을 찾을 수 없습니다.");
-  return reusable;
+  if (reusable) return reusable;
+
+  // 비어 있는 내장 템플릿에는 아직 AWB 10~18 블록이 없으므로,
+  // 냉동 열 앞의 기존 상품 사이즈 영역을 스타일 원본으로 사용한다.
+  for (let column = 1; column <= beforeColumn - 4; column += 1) {
+    const values = Array.from(
+      { length: 5 },
+      (_, offset) => cellText(sheet, headerRow, column + offset),
+    );
+    const numericHeaders = values.filter((value) => /^\d+$/.test(value)).length;
+    if (numericHeaders >= 3) return column;
+  }
+  throw new Error("새 AWB 열을 만들기 위한 상품 사이즈 블록을 찾을 수 없습니다.");
 }
 
 function isRowEmpty(sheet: XLSX.WorkSheet, row: number, range: XLSX.Range) {
@@ -482,6 +493,12 @@ function insertAwbBlock(
   ] as const) {
     const rowXml = getRowXml(shifted, row);
     shifted = shifted.replace(rowXml, upsertCell(rowXml, address, value));
+  }
+
+  for (const [offset, size] of ["10", "12", "14", "16", "18"].entries()) {
+    const address = `${XLSX.utils.encode_col(targetStart + offset - 1)}${headerRow}`;
+    const rowXml = getRowXml(shifted, headerRow);
+    shifted = shifted.replace(rowXml, upsertCell(rowXml, address, size));
   }
 
   for (let offset = 0; offset < insertion.width; offset += 1) {
