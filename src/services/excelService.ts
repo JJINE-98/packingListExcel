@@ -361,7 +361,7 @@ function generateFromBundledTemplate(workbook: XLSX.WorkBook, data: PackingListD
   if (typeof dateValue === "number") sheet[excelMapping.date].z = "mm\"월\"dd\"일\"";
   setValue(sheet, excelMapping.awbDescription, `${awb}(${totalQty}ct)`);
   setValue(sheet, excelMapping.awbHeader, data.awbNo.trim() || awb);
-  setValue(sheet, excelMapping.productHeader, aggregated.products.join(" / "));
+  setValue(sheet, excelMapping.productHeader, "", "s");
   setValue(sheet, excelMapping.size10, aggregated.quantities["10"], "n");
   setValue(sheet, excelMapping.size12, aggregated.quantities["12"], "n");
   setValue(sheet, excelMapping.size14, aggregated.quantities["14"], "n");

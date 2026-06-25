@@ -121,14 +121,26 @@ function findReusableAwbBlock(sheet: XLSX.WorkSheet, headerRow: number, beforeCo
 
   // 비어 있는 내장 템플릿에는 아직 AWB 10~18 블록이 없으므로,
   // 냉동 열 앞의 기존 상품 사이즈 영역을 스타일 원본으로 사용한다.
+  let bestColumn: number | undefined;
+  let bestScore = 0;
+  let bestStartsWithNumber = false;
   for (let column = 1; column <= beforeColumn - 4; column += 1) {
     const values = Array.from(
       { length: 5 },
       (_, offset) => cellText(sheet, headerRow, column + offset),
     );
     const numericHeaders = values.filter((value) => /^\d+$/.test(value)).length;
-    if (numericHeaders >= 3) return column;
+    const startsWithNumber = /^\d+$/.test(values[0]);
+    if (
+      numericHeaders > bestScore ||
+      numericHeaders === bestScore && startsWithNumber && !bestStartsWithNumber
+    ) {
+      bestColumn = column;
+      bestScore = numericHeaders;
+      bestStartsWithNumber = startsWithNumber;
+    }
   }
+  if (bestColumn && bestScore >= 3) return bestColumn;
   throw new Error("새 AWB 열을 만들기 위한 상품 사이즈 블록을 찾을 수 없습니다.");
 }
 
@@ -453,7 +465,12 @@ function insertAwbBlock(
   insertion: AwbBlockInsertion,
   headerRow: number,
   data: PackingListData,
-  styles: { awb: string; product: string; size: string },
+  styles: {
+    awb: string;
+    product: string;
+    sizeHighlighted: string;
+    sizePlain: string;
+  },
 ) {
   const original = xml;
   const sourceStart = insertion.sourceColumn;
@@ -505,17 +522,18 @@ function insertAwbBlock(
 
   const awbAddress = `${XLSX.utils.encode_col(targetStart - 1)}${awbHeaderRow}`;
   const productAddress = `${XLSX.utils.encode_col(targetStart - 1)}${productHeaderRow}`;
-  const product = data.items
-    .map((item) => [item.variety, item.grade].filter(Boolean).join(" ") || item.productName)
-    .filter(Boolean)
-    .join(" / ");
   for (const [row, address, value] of [
     [awbHeaderRow, awbAddress, data.awbNo.trim()],
-    [productHeaderRow, productAddress, product],
+    [productHeaderRow, productAddress, null],
   ] as const) {
     const rowXml = getRowXml(shifted, row);
     const style = row === awbHeaderRow ? styles.awb : styles.product;
-    let nextRowXml = upsertCell(rowXml, address, value, style);
+    const existing = getCellXml(rowXml, address);
+    let nextRowXml = value === null
+      ? existing
+        ? rowXml.replace(existing, `<c r="${address}" s="${style}"/>`)
+        : insertRawCell(rowXml, address, `<c r="${address}" s="${style}"/>`)
+      : upsertCell(rowXml, address, value, style);
     for (let offset = 0; offset < insertion.width; offset += 1) {
       const cellAddress = `${XLSX.utils.encode_col(targetStart + offset - 1)}${row}`;
       if (!getCellXml(nextRowXml, cellAddress)) {
@@ -526,12 +544,13 @@ function insertAwbBlock(
     shifted = shifted.replace(rowXml, nextRowXml);
   }
 
-  for (const [offset, size] of ["10", "12", "14", "16", "18"].entries()) {
+  for (const [offset, size] of ["10과", "12과", "14과", "16과", "18과"].entries()) {
     const address = `${XLSX.utils.encode_col(targetStart + offset - 1)}${headerRow}`;
     const rowXml = getRowXml(shifted, headerRow);
+    const style = offset < 2 ? styles.sizeHighlighted : styles.sizePlain;
     shifted = shifted.replace(
       rowXml,
-      setCellStyle(upsertCell(rowXml, address, size, styles.size), address, styles.size),
+      setCellStyle(upsertCell(rowXml, address, size, style), address, style),
     );
   }
 
@@ -666,35 +685,21 @@ function appendSolidFill(document: XmlDocument, fills: XmlElement, color: string
   return fills.getElementsByTagNameNS(MAIN_NS, "fill").length - 1;
 }
 
-function appendBoldFont(document: XmlDocument, fonts: XmlElement) {
-  const source = fonts.getElementsByTagNameNS(MAIN_NS, "font")[0];
-  const font = source?.cloneNode(true) as XmlElement | undefined
-    ?? document.createElementNS(MAIN_NS, "font");
-  if (!font.getElementsByTagNameNS(MAIN_NS, "b").length) {
-    font.insertBefore(document.createElementNS(MAIN_NS, "b"), font.firstChild);
-  }
-  fonts.appendChild(font);
-  fonts.setAttribute("count", String(fonts.getElementsByTagNameNS(MAIN_NS, "font").length));
-  return fonts.getElementsByTagNameNS(MAIN_NS, "font").length - 1;
-}
-
 function appendCellStyle(
   document: ReturnType<DOMParser["parseFromString"]>,
   cellXfs: XmlElement,
   baseStyle: number,
-  fontId?: number,
   fillId?: number,
+  numberFormatId?: number,
 ) {
   const xfs = cellXfs.getElementsByTagNameNS(MAIN_NS, "xf");
   const base = xfs[Math.min(baseStyle, xfs.length - 1)];
   const xf = base?.cloneNode(true) as XmlElement | undefined
     ?? document.createElementNS(MAIN_NS, "xf");
-  xf.setAttribute("numFmtId", "0");
-  if (fontId !== undefined) {
-    xf.setAttribute("fontId", String(fontId));
-    xf.setAttribute("applyFont", "1");
+  if (numberFormatId !== undefined) {
+    xf.setAttribute("numFmtId", String(numberFormatId));
+    xf.setAttribute("applyNumberFormat", "1");
   }
-  xf.setAttribute("applyNumberFormat", "1");
   if (fillId !== undefined) {
     xf.setAttribute("fillId", String(fillId));
     xf.setAttribute("applyFill", "1");
@@ -717,18 +722,23 @@ function createAwbStyles(
 ) {
   const document = new DOMParser().parseFromString(stylesXml, "application/xml");
   const fills = document.getElementsByTagNameNS(MAIN_NS, "fills")[0];
-  const fonts = document.getElementsByTagNameNS(MAIN_NS, "fonts")[0];
   const cellXfs = document.getElementsByTagNameNS(MAIN_NS, "cellXfs")[0];
-  if (!fills || !fonts || !cellXfs) throw new Error("Excel 스타일 구조를 읽을 수 없습니다.");
-  const boldFont = appendBoldFont(document, fonts);
-  const awbFill = appendSolidFill(document, fills, "FF00B0F0");
-  const productFill = appendSolidFill(document, fills, "FFCCFFFF");
+  if (!fills || !cellXfs) throw new Error("Excel 스타일 구조를 읽을 수 없습니다.");
+  const awbFill = appendSolidFill(document, fills, "FFFFFF00");
+  const whiteFill = appendSolidFill(document, fills, "FFFFFFFF");
   const sizeFill = appendSolidFill(document, fills, "FFFFFF00");
+  const baseXfs = cellXfs.getElementsByTagNameNS(MAIN_NS, "xf");
+  const sizeNumberFormat = Number(baseXfs[baseStyles.size]?.getAttribute("numFmtId") ?? 0);
   const styles = {
-    awb: String(appendCellStyle(document, cellXfs, baseStyles.awb, boldFont, awbFill)),
-    product: String(appendCellStyle(document, cellXfs, baseStyles.product, boldFont, productFill)),
-    size: String(appendCellStyle(document, cellXfs, baseStyles.size, boldFont, sizeFill)),
-    numeric: String(appendCellStyle(document, cellXfs, baseStyles.numeric)),
+    awb: String(appendCellStyle(document, cellXfs, baseStyles.awb, awbFill)),
+    product: String(appendCellStyle(document, cellXfs, baseStyles.product, whiteFill)),
+    sizeHighlighted: String(
+      appendCellStyle(document, cellXfs, baseStyles.size, sizeFill, sizeNumberFormat),
+    ),
+    sizePlain: String(
+      appendCellStyle(document, cellXfs, baseStyles.size, whiteFill, sizeNumberFormat),
+    ),
+    numeric: String(appendCellStyle(document, cellXfs, baseStyles.numeric, undefined, 0)),
   };
   return { xml: new XMLSerializer().serializeToString(document), styles };
 }

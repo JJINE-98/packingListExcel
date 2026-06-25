@@ -80,7 +80,7 @@ export function ExtractedDataTable({ form }: Props) {
 
       {fields[activeItem] && (
         <div className="space-y-5 p-4">
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-xs font-semibold text-slate-600">
               Product Name
               <input className={inputClass} {...register(`items.${activeItem}.productName`)} />
@@ -88,10 +88,6 @@ export function ExtractedDataTable({ form }: Props) {
             <label className="text-xs font-semibold text-slate-600">
               Variety
               <input className={inputClass} {...register(`items.${activeItem}.variety`)} />
-            </label>
-            <label className="text-xs font-semibold text-slate-600">
-              Grade
-              <input className={inputClass} {...register(`items.${activeItem}.grade`)} />
             </label>
           </div>
 
