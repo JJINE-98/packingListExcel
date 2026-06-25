@@ -260,6 +260,31 @@ function emptyStyledCell(cellXml: string, address: string) {
   return `<c r="${address}"${style ? ` s="${style}"` : ""}/>`;
 }
 
+function clearSharedStringCells(
+  sheetXml: string,
+  sharedStringsXml: string,
+  targetText: string,
+) {
+  const document = new DOMParser().parseFromString(sharedStringsXml, "application/xml");
+  const targetIndexes = new Set<string>();
+  const sharedStrings = Array.from(document.getElementsByTagNameNS(MAIN_NS, "si"));
+  sharedStrings.forEach((item, index) => {
+    if ((item.textContent ?? "").trim() === targetText) targetIndexes.add(String(index));
+  });
+  if (!targetIndexes.size) return sheetXml;
+
+  return sheetXml.replace(
+    /<c\b[^>]*\br="([A-Z]+\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g,
+    (cellXml, address: string) => {
+      if (!/\bt="s"/.test(cellXml)) return cellXml;
+      const sharedStringIndex = cellXml.match(/<v>(\d+)<\/v>/)?.[1];
+      return sharedStringIndex && targetIndexes.has(sharedStringIndex)
+        ? emptyStyledCell(cellXml, address)
+        : cellXml;
+    },
+  );
+}
+
 function cloneStyledRow(xml: string, sourceRow: number, targetRow: number) {
   const source = getRowXml(xml, sourceRow);
   if (!source) return `<row r="${targetRow}"></row>`;
@@ -836,7 +861,11 @@ function enableWorkbookRecalculation(workbookXml: string) {
   );
 }
 
-export async function generateManagedWorkbookXml(file: File, data: PackingListData) {
+export async function generateManagedWorkbookXml(
+  file: File,
+  data: PackingListData,
+  options: { blankQuarantineLoss?: boolean } = {},
+) {
   const bytes = await file.arrayBuffer();
   const workbook = XLSX.read(bytes, {
     type: "array",
@@ -891,6 +920,12 @@ export async function generateManagedWorkbookXml(file: File, data: PackingListDa
   sheetXml = sheetXml.replace(currentRow, populateRow(currentRow, targetRow, layout, data, columnStyles));
   const outputSummaryRow = layout.summaryRow + (insertRow ? 1 : 0);
   sheetXml = updateCachedTotals(sheetXml, outputSummaryRow, layout, data);
+  if (options.blankQuarantineLoss) {
+    const sharedStringsXml = await zip.file("xl/sharedStrings.xml")?.async("string");
+    if (sharedStringsXml) {
+      sheetXml = clearSharedStringCells(sheetXml, sharedStringsXml, "검역로스");
+    }
+  }
   zip.file(sheetPath, sheetXml);
   zip.file("xl/workbook.xml", enableWorkbookRecalculation(workbookXml));
   removeCalcChain(zip);

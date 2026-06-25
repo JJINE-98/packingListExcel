@@ -377,6 +377,7 @@ function generateFromBundledTemplate(workbook: XLSX.WorkBook, data: PackingListD
 }
 
 export async function generateShippingWorkbook(documents: PackingListData[], managedExcel?: File | null): Promise<Blob> {
+  const usesBundledTemplate = !managedExcel;
   let source = managedExcel;
   if (!source) {
     const response = await fetch(TEMPLATE_URL);
@@ -391,7 +392,9 @@ export async function generateShippingWorkbook(documents: PackingListData[], man
         ...document,
         items: [structuredClone(item)],
       };
-      output = await generateManagedWorkbookXml(source, rowData);
+      output = await generateManagedWorkbookXml(source, rowData, {
+        blankQuarantineLoss: usesBundledTemplate,
+      });
       source = new File([output], source.name, { type: MIME_XLSX });
     }
   }
