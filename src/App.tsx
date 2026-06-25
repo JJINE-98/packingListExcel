@@ -206,8 +206,8 @@ export default function App() {
         )}
 
         <form className="space-y-5" onSubmit={download}>
-          <section className="grid gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(480px,0.92fr)]">
-            <div ref={leftPanelRef} className="space-y-5">
+          <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(480px,0.92fr)]">
+            <div ref={leftPanelRef} className="self-start space-y-5">
               <section className="rounded-2xl border bg-white p-4 shadow-card">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -267,7 +267,7 @@ export default function App() {
             </div>
 
             <section
-              className="flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-white p-4 shadow-card"
+              className="flex min-h-0 self-start flex-col overflow-hidden rounded-2xl border bg-white p-4 shadow-card"
               style={leftPanelHeight ? { height: leftPanelHeight } : undefined}
             >
               <div className="mb-3">

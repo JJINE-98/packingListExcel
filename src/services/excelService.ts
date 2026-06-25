@@ -128,6 +128,14 @@ function isRowEmpty(sheet: XLSX.WorkSheet, row: number) {
   return true;
 }
 
+function findNextDataRow(sheet: XLSX.WorkSheet, dataStartRow: number, summaryRow: number) {
+  let lastPopulatedRow = dataStartRow - 1;
+  for (let row = dataStartRow; row < summaryRow; row += 1) {
+    if (!isRowEmpty(sheet, row)) lastPopulatedRow = row;
+  }
+  return Math.max(dataStartRow, lastPopulatedRow + 1);
+}
+
 function cloneCell(cell: XLSX.CellObject | undefined) {
   if (!cell) return undefined;
   return structuredClone(cell);
@@ -275,11 +283,10 @@ function analyzeDynamicLayout(sheet: XLSX.WorkSheet, awbNo: string): DynamicLayo
 
 function findOrCreateDataRow(sheet: XLSX.WorkSheet, layout: DynamicLayout) {
   const range = XLSX.utils.decode_range(sheet["!ref"] ?? "A1");
-  for (let row = layout.dataStartRow; row < layout.summaryRow; row += 1) {
-    if (isRowEmpty(sheet, row)) {
-      applyDataRowStyle(sheet, row, range, layout.dataStartRow);
-      return row;
-    }
+  const nextRow = findNextDataRow(sheet, layout.dataStartRow, layout.summaryRow);
+  if (nextRow < layout.summaryRow) {
+    applyDataRowStyle(sheet, nextRow, range, layout.dataStartRow);
+    return nextRow;
   }
   insertWorksheetRow(sheet, layout.summaryRow, range, layout.dataStartRow);
   return layout.summaryRow;

@@ -6,6 +6,8 @@ import { excelSerialFromDate, normalizeAwb } from "../utils/excelUtils";
 
 const TARGET_SHEET = "출고요청서";
 const MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+type XmlDocument = ReturnType<DOMParser["parseFromString"]>;
+type XmlElement = ReturnType<XmlDocument["createElementNS"]>;
 
 interface DynamicLayout {
   headerRow: number;
@@ -14,6 +16,7 @@ interface DynamicLayout {
   sizeColumns: Partial<Record<"10" | "12" | "14" | "16" | "18", number>>;
   totalColumn: number;
   remarksColumn?: number;
+  numericStyle?: string;
 }
 
 interface AwbBlockInsertion {
@@ -139,6 +142,18 @@ function isRowEmpty(sheet: XLSX.WorkSheet, row: number) {
   return true;
 }
 
+function findNextDataRow(sheet: XLSX.WorkSheet, dataStartRow: number, summaryRow: number) {
+  let lastPopulatedRow = dataStartRow - 1;
+  for (let row = dataStartRow; row < summaryRow; row += 1) {
+    if (!isRowEmpty(sheet, row)) lastPopulatedRow = row;
+  }
+  const nextRow = Math.max(dataStartRow, lastPopulatedRow + 1);
+  return {
+    targetRow: nextRow < summaryRow ? nextRow : summaryRow,
+    insertRow: nextRow >= summaryRow,
+  };
+}
+
 function analyzeLayout(workbook: XLSX.WorkBook, awbNo: string) {
   if (workbook.SheetNames[0] !== TARGET_SHEET || !workbook.Sheets[TARGET_SHEET]) {
     throw new Error(`첨부 Excel의 첫 번째 시트 이름이 '${TARGET_SHEET}'이어야 합니다.`);
@@ -180,15 +195,7 @@ function analyzeLayout(workbook: XLSX.WorkBook, awbNo: string) {
   const remarksColumn = originalRemarksColumn === undefined
     ? undefined
     : originalRemarksColumn + (awbBlockInsertion && originalRemarksColumn >= awbBlockInsertion.insertionColumn ? awbBlockInsertion.width : 0);
-  let targetRow = summaryRow;
-  let insertRow = true;
-  for (let row = dataStartRow; row < summaryRow; row += 1) {
-    if (isRowEmpty(sheet, row)) {
-      targetRow = row;
-      insertRow = false;
-      break;
-    }
-  }
+  const { targetRow, insertRow } = findNextDataRow(sheet, dataStartRow, summaryRow);
   return {
     layout: { headerRow, dataStartRow, summaryRow, sizeColumns, totalColumn, remarksColumn },
     targetRow,
@@ -221,6 +228,15 @@ function getCellXml(rowXml: string, address: string) {
 
 function styleAttribute(cellXml: string) {
   return cellXml.match(/\bs="(\d+)"/)?.[1];
+}
+
+function setCellStyle(rowXml: string, address: string, style: string) {
+  const existing = getCellXml(rowXml, address);
+  if (!existing) return rowXml;
+  const styled = /\bs="\d+"/.test(existing)
+    ? existing.replace(/\bs="\d+"/, `s="${style}"`)
+    : existing.replace(/^<c\b/, `<c s="${style}"`);
+  return rowXml.replace(existing, styled);
 }
 
 function columnNumber(address: string) {
@@ -437,6 +453,7 @@ function insertAwbBlock(
   insertion: AwbBlockInsertion,
   headerRow: number,
   data: PackingListData,
+  styles: { awb: string; product: string; size: string },
 ) {
   const original = xml;
   const sourceStart = insertion.sourceColumn;
@@ -447,7 +464,9 @@ function insertAwbBlock(
     .filter((match) => {
       const start = XLSX.utils.decode_col(match[1]) + 1;
       const end = XLSX.utils.decode_col(match[3]) + 1;
-      return start >= sourceStart && end <= sourceEnd;
+      const startRow = Number(match[2]);
+      const isReplacedHeaderMerge = startRow === headerRow - 2 || startRow === headerRow - 1;
+      return start >= sourceStart && end <= sourceEnd && !isReplacedHeaderMerge;
     })
     .map((match) => {
       const start = XLSX.utils.decode_col(match[1]) + 1 + columnDelta;
@@ -474,12 +493,16 @@ function insertAwbBlock(
     shifted = shifted.replace(getRowXml(shifted, row), targetRowXml);
   }
 
-  if (sourceMerges.length) {
-    shifted = shifted.replace(/<\/mergeCells>/, `${sourceMerges.join("")}</mergeCells>`);
-  }
-
   const awbHeaderRow = headerRow - 2;
   const productHeaderRow = headerRow - 1;
+  const targetEnd = targetStart + insertion.width - 1;
+  const newMerges = [
+    ...sourceMerges,
+    `<mergeCell ref="${XLSX.utils.encode_col(targetStart - 1)}${awbHeaderRow}:${XLSX.utils.encode_col(targetEnd - 1)}${awbHeaderRow}"/>`,
+    `<mergeCell ref="${XLSX.utils.encode_col(targetStart - 1)}${productHeaderRow}:${XLSX.utils.encode_col(targetEnd - 1)}${productHeaderRow}"/>`,
+  ];
+  shifted = shifted.replace(/<\/mergeCells>/, `${newMerges.join("")}</mergeCells>`);
+
   const awbAddress = `${XLSX.utils.encode_col(targetStart - 1)}${awbHeaderRow}`;
   const productAddress = `${XLSX.utils.encode_col(targetStart - 1)}${productHeaderRow}`;
   const product = data.items
@@ -491,13 +514,25 @@ function insertAwbBlock(
     [productHeaderRow, productAddress, product],
   ] as const) {
     const rowXml = getRowXml(shifted, row);
-    shifted = shifted.replace(rowXml, upsertCell(rowXml, address, value));
+    const style = row === awbHeaderRow ? styles.awb : styles.product;
+    let nextRowXml = upsertCell(rowXml, address, value, style);
+    for (let offset = 0; offset < insertion.width; offset += 1) {
+      const cellAddress = `${XLSX.utils.encode_col(targetStart + offset - 1)}${row}`;
+      if (!getCellXml(nextRowXml, cellAddress)) {
+        nextRowXml = insertRawCell(nextRowXml, cellAddress, `<c r="${cellAddress}" s="${style}"/>`);
+      }
+      nextRowXml = setCellStyle(nextRowXml, cellAddress, style);
+    }
+    shifted = shifted.replace(rowXml, nextRowXml);
   }
 
   for (const [offset, size] of ["10", "12", "14", "16", "18"].entries()) {
     const address = `${XLSX.utils.encode_col(targetStart + offset - 1)}${headerRow}`;
     const rowXml = getRowXml(shifted, headerRow);
-    shifted = shifted.replace(rowXml, upsertCell(rowXml, address, size));
+    shifted = shifted.replace(
+      rowXml,
+      setCellStyle(upsertCell(rowXml, address, size, styles.size), address, styles.size),
+    );
   }
 
   for (let offset = 0; offset < insertion.width; offset += 1) {
@@ -599,12 +634,103 @@ function populateRow(
     const column = layout.sizeColumns[size];
     if (column) {
       const columnName = XLSX.utils.encode_col(column - 1);
-      result = upsertCell(result, `${columnName}${row}`, aggregated.quantities[size], columnStyles.get(columnName));
+      result = upsertCell(
+        result,
+        `${columnName}${row}`,
+        aggregated.quantities[size],
+        layout.numericStyle ?? columnStyles.get(columnName),
+      );
+      if (layout.numericStyle) {
+        result = setCellStyle(result, `${columnName}${row}`, layout.numericStyle);
+      }
     }
   }
   const totalColumnName = XLSX.utils.encode_col(layout.totalColumn - 1);
   result = upsertCell(result, `${totalColumnName}${row}`, totalQuantity, columnStyles.get(totalColumnName));
   return result;
+}
+
+function appendSolidFill(document: XmlDocument, fills: XmlElement, color: string) {
+  const fill = document.createElementNS(MAIN_NS, "fill");
+  const pattern = document.createElementNS(MAIN_NS, "patternFill");
+  pattern.setAttribute("patternType", "solid");
+  const foreground = document.createElementNS(MAIN_NS, "fgColor");
+  foreground.setAttribute("rgb", color);
+  const background = document.createElementNS(MAIN_NS, "bgColor");
+  background.setAttribute("indexed", "64");
+  pattern.appendChild(foreground);
+  pattern.appendChild(background);
+  fill.appendChild(pattern);
+  fills.appendChild(fill);
+  fills.setAttribute("count", String(fills.getElementsByTagNameNS(MAIN_NS, "fill").length));
+  return fills.getElementsByTagNameNS(MAIN_NS, "fill").length - 1;
+}
+
+function appendBoldFont(document: XmlDocument, fonts: XmlElement) {
+  const source = fonts.getElementsByTagNameNS(MAIN_NS, "font")[0];
+  const font = source?.cloneNode(true) as XmlElement | undefined
+    ?? document.createElementNS(MAIN_NS, "font");
+  if (!font.getElementsByTagNameNS(MAIN_NS, "b").length) {
+    font.insertBefore(document.createElementNS(MAIN_NS, "b"), font.firstChild);
+  }
+  fonts.appendChild(font);
+  fonts.setAttribute("count", String(fonts.getElementsByTagNameNS(MAIN_NS, "font").length));
+  return fonts.getElementsByTagNameNS(MAIN_NS, "font").length - 1;
+}
+
+function appendCellStyle(
+  document: ReturnType<DOMParser["parseFromString"]>,
+  cellXfs: XmlElement,
+  baseStyle: number,
+  fontId?: number,
+  fillId?: number,
+) {
+  const xfs = cellXfs.getElementsByTagNameNS(MAIN_NS, "xf");
+  const base = xfs[Math.min(baseStyle, xfs.length - 1)];
+  const xf = base?.cloneNode(true) as XmlElement | undefined
+    ?? document.createElementNS(MAIN_NS, "xf");
+  xf.setAttribute("numFmtId", "0");
+  if (fontId !== undefined) {
+    xf.setAttribute("fontId", String(fontId));
+    xf.setAttribute("applyFont", "1");
+  }
+  xf.setAttribute("applyNumberFormat", "1");
+  if (fillId !== undefined) {
+    xf.setAttribute("fillId", String(fillId));
+    xf.setAttribute("applyFill", "1");
+  }
+  let alignment = xf.getElementsByTagNameNS(MAIN_NS, "alignment")[0];
+  if (!alignment) {
+    alignment = document.createElementNS(MAIN_NS, "alignment");
+    xf.appendChild(alignment);
+  }
+  alignment.setAttribute("horizontal", "center");
+  alignment.setAttribute("vertical", "center");
+  cellXfs.appendChild(xf);
+  cellXfs.setAttribute("count", String(cellXfs.getElementsByTagNameNS(MAIN_NS, "xf").length));
+  return cellXfs.getElementsByTagNameNS(MAIN_NS, "xf").length - 1;
+}
+
+function createAwbStyles(
+  stylesXml: string,
+  baseStyles: { awb: number; product: number; size: number; numeric: number },
+) {
+  const document = new DOMParser().parseFromString(stylesXml, "application/xml");
+  const fills = document.getElementsByTagNameNS(MAIN_NS, "fills")[0];
+  const fonts = document.getElementsByTagNameNS(MAIN_NS, "fonts")[0];
+  const cellXfs = document.getElementsByTagNameNS(MAIN_NS, "cellXfs")[0];
+  if (!fills || !fonts || !cellXfs) throw new Error("Excel 스타일 구조를 읽을 수 없습니다.");
+  const boldFont = appendBoldFont(document, fonts);
+  const awbFill = appendSolidFill(document, fills, "FF00B0F0");
+  const productFill = appendSolidFill(document, fills, "FFCCFFFF");
+  const sizeFill = appendSolidFill(document, fills, "FFFFFF00");
+  const styles = {
+    awb: String(appendCellStyle(document, cellXfs, baseStyles.awb, boldFont, awbFill)),
+    product: String(appendCellStyle(document, cellXfs, baseStyles.product, boldFont, productFill)),
+    size: String(appendCellStyle(document, cellXfs, baseStyles.size, boldFont, sizeFill)),
+    numeric: String(appendCellStyle(document, cellXfs, baseStyles.numeric)),
+  };
+  return { xml: new XMLSerializer().serializeToString(document), styles };
 }
 
 function getAddedColumnValues(layout: DynamicLayout, data: PackingListData) {
@@ -708,7 +834,9 @@ export async function generateManagedWorkbookXml(file: File, data: PackingListDa
     cellStyles: true,
     sheetStubs: true,
   });
-  const { layout, targetRow, insertRow, awbBlockInsertion } = analyzeLayout(workbook, data.awbNo);
+  const analyzed = analyzeLayout(workbook, data.awbNo);
+  const layout: DynamicLayout = analyzed.layout;
+  const { targetRow, insertRow, awbBlockInsertion } = analyzed;
   const zip = await JSZip.loadAsync(bytes);
   const workbookXml = await zip.file("xl/workbook.xml")?.async("string");
   const relationshipsXml = await zip.file("xl/_rels/workbook.xml.rels")?.async("string");
@@ -718,7 +846,19 @@ export async function generateManagedWorkbookXml(file: File, data: PackingListDa
   if (!sheetXml) throw new Error("출고요청서 시트 XML을 읽을 수 없습니다.");
 
   if (awbBlockInsertion) {
-    sheetXml = insertAwbBlock(sheetXml, awbBlockInsertion, layout.headerRow, data);
+    const stylesXml = await zip.file("xl/styles.xml")?.async("string");
+    if (!stylesXml) throw new Error("Excel 스타일 파일을 읽을 수 없습니다.");
+    const sourceColumnName = XLSX.utils.encode_col(awbBlockInsertion.sourceColumn - 1);
+    const baseStyles = {
+      awb: Number(styleAttribute(getCellXml(getRowXml(sheetXml, layout.headerRow - 2), `${sourceColumnName}${layout.headerRow - 2}`)) ?? 0),
+      product: Number(styleAttribute(getCellXml(getRowXml(sheetXml, layout.headerRow - 1), `${sourceColumnName}${layout.headerRow - 1}`)) ?? 0),
+      size: Number(styleAttribute(getCellXml(getRowXml(sheetXml, layout.headerRow), `${sourceColumnName}${layout.headerRow}`)) ?? 0),
+      numeric: Number(styleAttribute(getCellXml(getRowXml(sheetXml, layout.dataStartRow), `${sourceColumnName}${layout.dataStartRow}`)) ?? 0),
+    };
+    const created = createAwbStyles(stylesXml, baseStyles);
+    zip.file("xl/styles.xml", created.xml);
+    layout.numericStyle = created.styles.numeric;
+    sheetXml = insertAwbBlock(sheetXml, awbBlockInsertion, layout.headerRow, data, created.styles);
   }
   const styleSourceRow = findStyleSourceRow(sheetXml, targetRow - 1, layout.dataStartRow);
   const columnStyles = collectColumnStyles(sheetXml, layout.dataStartRow, layout.summaryRow - 1);

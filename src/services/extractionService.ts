@@ -102,6 +102,15 @@ export function extractPackingList(rawText: string): PackingListData {
     if (structuredGrade) item.grade = structuredGrade.replace(/\s+/g, " ");
   }
 
+  if (
+    item.sizeKg !== "" &&
+    item.netWeight !== "" &&
+    Number(item.sizeKg) > 0 &&
+    Number(item.netWeight) % Number(item.sizeKg) === 0
+  ) {
+    item.totalQuantity = Number(item.netWeight) / Number(item.sizeKg);
+  }
+
   const quantitySum = Object.values(item.quantities).reduce<number>((sum, value) => sum + (value === "" ? 0 : value), 0);
   if (item.totalQuantity === "" && quantitySum > 0) item.totalQuantity = quantitySum;
   if (item.totalQuantity !== "") {
