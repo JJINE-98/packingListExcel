@@ -37,18 +37,18 @@ export class TesseractOcrProvider implements IOcrProvider {
     bitmap: ImageBitmap,
     ratios: readonly [number, number, number, number],
     binary = false,
-    insetFactor = 0.06,
+    insetFactor = 0,
+    scale = 5,
   ) {
     const horizontalInset = (ratios[2] - ratios[0]) * insetFactor;
-    const verticalExpansion = (ratios[3] - ratios[1]) * 0.18;
+    const verticalExpansion = binary ? (ratios[3] - ratios[1]) * 0.1 : 0;
     const crop = {
       x: Math.round(bitmap.width * (ratios[0] + horizontalInset)),
       y: Math.max(0, Math.round(bitmap.height * (ratios[1] - verticalExpansion))),
       width: Math.round(bitmap.width * (ratios[2] - ratios[0] - horizontalInset * 2)),
       height: Math.round(bitmap.height * (ratios[3] - ratios[1] + verticalExpansion * 2)),
     };
-    const scale = 8;
-    const padding = 70;
+    const padding = binary ? 60 : 50;
     const canvas = document.createElement("canvas");
     canvas.width = crop.width * scale + padding * 2;
     canvas.height = crop.height * scale + padding * 2;
@@ -130,18 +130,25 @@ export class TesseractOcrProvider implements IOcrProvider {
     rect: readonly [number, number, number, number],
   ) {
     const candidates = new Map<number, number>();
-    for (const variant of [
-      { binary: false, inset: 0.02 },
-      { binary: false, inset: 0.08 },
-      { binary: true, inset: 0.04 },
-    ]) {
+    const variants = [
+      // 기존에 안정적으로 동작했던 원본 영역/배율을 반드시 첫 후보로 유지한다.
+      { binary: false, inset: 0, scale: 5 },
+      { binary: false, inset: 0.02, scale: 7 },
+      { binary: true, inset: 0.02, scale: 7 },
+    ];
+    for (const [index, variant] of variants.entries()) {
       const result = await worker.recognize(
-        this.createCellCanvas(bitmap, rect, variant.binary, variant.inset),
+        this.createCellCanvas(bitmap, rect, variant.binary, variant.inset, variant.scale),
       );
       const cleaned = result.data.text.replace(/,/g, "").replace(/[^\d.]/g, "").trim();
       const value = Number(cleaned);
       if (cleaned && Number.isFinite(value)) {
-        candidates.set(value, Math.max(candidates.get(value) ?? 0, result.data.confidence));
+        const primaryBias = index === 0 ? 20 : 0;
+        const agreementBias = candidates.has(value) ? 10 : 0;
+        candidates.set(
+          value,
+          Math.max(candidates.get(value) ?? 0, result.data.confidence + primaryBias + agreementBias),
+        );
       }
     }
     return [...candidates.entries()]
@@ -157,10 +164,14 @@ export class TesseractOcrProvider implements IOcrProvider {
     const sizeKg = candidates.get("SIZE_KG")?.[0]?.value;
     const netWeight = candidates.get("NET_WEIGHT")?.[0]?.value;
     const recognizedTotal = candidates.get("TOTAL_QUANTITY")?.[0]?.value;
-    const calculatedTotal = sizeKg && netWeight && netWeight % sizeKg === 0
+    const calculatedTotal = sizeKg && netWeight && sizeKg >= 1 && sizeKg <= 20 && netWeight >= 10 && netWeight % sizeKg === 0
       ? netWeight / sizeKg
       : undefined;
-    const expectedTotal = calculatedTotal ?? recognizedTotal;
+    const expectedTotal = calculatedTotal && calculatedTotal >= 10 && calculatedTotal <= 100000
+      ? calculatedTotal
+      : recognizedTotal && recognizedTotal >= 10
+        ? recognizedTotal
+        : undefined;
 
     if (!expectedTotal) {
       return new Map(
@@ -173,9 +184,7 @@ export class TesseractOcrProvider implements IOcrProvider {
     ]);
     for (const key of sizeKeys) {
       const recognized = candidates.get(key) ?? [];
-      const options = recognized.some((candidate) => candidate.value === 0)
-        ? recognized
-        : [...recognized, { value: 0, confidence: recognized.length ? 10 : 50 }];
+      const options = recognized.length ? recognized : [{ value: 0, confidence: 0 }];
       const next = new Map<number, { values: number[]; confidence: number }>();
       for (const [sum, state] of states) {
         for (const option of options) {
@@ -191,11 +200,19 @@ export class TesseractOcrProvider implements IOcrProvider {
       states = next;
     }
 
-    const best = [...states.entries()].sort((first, second) => {
+    const ranked = [...states.entries()].sort((first, second) => {
       const firstDistance = Math.abs(first[0] - expectedTotal);
       const secondDistance = Math.abs(second[0] - expectedTotal);
       return firstDistance - secondDistance || second[1].confidence - first[1].confidence;
-    })[0];
+    });
+    const best = ranked[0];
+    // 합계가 정확히 일치할 때만 후보 조합으로 교체한다.
+    // 일치하지 않으면 각 셀의 최고 신뢰도 결과를 그대로 사용한다.
+    if (!best || best[0] !== expectedTotal) {
+      return new Map(
+        [...candidates].map(([key, values]) => [key, values[0]?.value]),
+      );
+    }
     const selected = new Map<string, number | undefined>();
     sizeKeys.forEach((key, index) => selected.set(key, best?.[1].values[index]));
     for (const [key, values] of candidates) {
@@ -230,7 +247,7 @@ export class TesseractOcrProvider implements IOcrProvider {
 
     for (const cell of cells) {
       await worker.setParameters({
-        tessedit_pageseg_mode: cell.numeric ? PSM.SINGLE_WORD : PSM.SINGLE_BLOCK,
+        tessedit_pageseg_mode: cell.numeric ? PSM.SINGLE_LINE : PSM.SINGLE_BLOCK,
         tessedit_char_whitelist: cell.numeric ? "0123456789,." : "",
         preserve_interword_spaces: "1",
         user_defined_dpi: "300",
