@@ -171,8 +171,19 @@ export default function App() {
       showToast(managedExcel
         ? "기존 Excel에 AWB 열 블록과 상품 행을 반영해 다운로드했습니다."
         : "Excel 다운로드가 완료되었습니다.");
-    } catch {
-      // 상세 오류는 useExcelExport의 토스트에서 표시한다.
+    } catch (cause) {
+      showToast(
+        cause instanceof Error ? cause.message : "Excel 다운로드 중 오류가 발생했습니다.",
+        "error",
+      );
+    }
+  }, (errors) => {
+    if (errors.date) {
+      showToast("날짜가 인식되지 않았습니다. Date를 입력한 후 다시 다운로드해 주세요.", "error");
+      return;
+    }
+    if (errors.awbNo) {
+      showToast("AWB NO.를 입력한 후 다시 다운로드해 주세요.", "error");
     }
   });
 

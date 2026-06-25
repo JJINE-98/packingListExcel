@@ -26,8 +26,15 @@ export function normalizeDateInput(value: string) {
 
 export const normalizeAwb = (awb: string) => {
   const digits = awb.replace(/[^\d]/g, "");
-  // OCR이 AWB 앞의 표 선 등을 숫자 1로 잘못 읽는 경우 실제 618 운송장 번호만 사용한다.
-  const awbDigits = digits.match(/618\d{8}/)?.[0] ?? digits;
+  // OCR이 AWB 앞의 표 선 등을 숫자 1로 잘못 읽어 12자리로 만드는 경우가 있다.
+  // 항공사 Prefix(618)가 시작되는 마지막 위치부터 정확히 11자리만 사용한다.
+  const prefixIndex = digits.lastIndexOf("618");
+  const prefixedCandidate = prefixIndex >= 0 ? digits.slice(prefixIndex, prefixIndex + 11) : "";
+  const awbDigits = prefixedCandidate.length === 11
+    ? prefixedCandidate
+    : digits.length === 12 && digits.startsWith("1")
+      ? digits.slice(1)
+      : digits;
   return awbDigits.replace(/^(\d{3})(\d{4})(\d{4})$/, "$1-$2-$3");
 };
 

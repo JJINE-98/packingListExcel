@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createOcrProvider, type IOcrProvider } from "../services/ocrService";
 import { releasePageUrls, renderPdf } from "../services/pdfService";
 import type { OcrProgress, OcrResult } from "../types/packingList";
+import { normalizeAwb } from "../utils/excelUtils";
 
 export interface ProcessedPdf {
   result: OcrResult;
@@ -37,8 +38,10 @@ export function useOcr() {
             status: `PDF ${index + 1}/${files.length} · ${progress.status}`,
           });
         });
+        const result = await provider.current.extractFields(rawText);
+        result.data.awbNo = normalizeAwb(result.data.awbNo);
         processed.push({
-          result: await provider.current.extractFields(rawText),
+          result,
           pageUrls: rendered.pageUrls,
         });
       }
@@ -64,6 +67,7 @@ export function useOcr() {
     try {
       const rawText = await provider.current.extractText(latestPageImages, setProgress);
       const nextResult = await provider.current.extractFields(rawText);
+      nextResult.data.awbNo = normalizeAwb(nextResult.data.awbNo);
       return nextResult;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "OCR 재실행에 실패했습니다.");
