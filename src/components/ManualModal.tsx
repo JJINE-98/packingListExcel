@@ -1,4 +1,4 @@
-import { FileCheck2, FileDown, ScanText, Upload, X } from "lucide-react";
+import { AlertCircle, FileCheck2, FileDown, ScanText, Upload, X } from "lucide-react";
 import { useEffect } from "react";
 
 interface Props {
@@ -9,23 +9,23 @@ interface Props {
 const steps = [
   {
     icon: Upload,
-    title: "1. PDF 여러 개 추가",
-    description: "PDF를 한 번에 여러 개 선택하거나 작업 중 계속 추가할 수 있습니다. 이전 스캔 결과는 지워지지 않고 누적됩니다.",
+    title: "1. 패킹리스트 PDF 선택",
+    description: "화면 위쪽의 PDF 업로드 영역을 눌러 파일을 선택하세요. 여러 파일을 한 번에 선택해도 되고, 작업 중에 추가로 올려도 됩니다.",
   },
   {
     icon: ScanText,
-    title: "2. OCR 분석",
-    description: "PDF 페이지를 이미지로 변환한 뒤 OCR을 실행합니다. 화면의 진행률로 처리 상태를 확인할 수 있습니다.",
+    title: "2. OCR이 끝날 때까지 기다리기",
+    description: "업로드하면 글자와 숫자를 자동으로 읽습니다. 진행률이 100%가 될 때까지 기다려 주세요. 처리 중에는 창을 닫지 않는 것이 좋습니다.",
   },
   {
     icon: FileCheck2,
-    title: "3. 결과 검수",
-    description: "스캔 목록에서 문서를 선택하면 해당 PDF와 출고 정보가 표시됩니다. 상품 탭을 이동하며 값을 직접 수정할 수 있습니다.",
+    title: "3. 읽은 내용 확인 및 수정",
+    description: "왼쪽에서 Date, AWB NO., 상품명과 수량을 확인하세요. 오른쪽 PDF와 비교해 틀린 값이 있으면 입력란을 눌러 직접 고칠 수 있습니다.",
   },
   {
     icon: FileDown,
-    title: "4. Excel 열·행 추가",
-    description: "모든 PDF를 한 번에 반영합니다. AWB가 없으면 새 5열 블록을 만들고, 각 패킹리스트의 품목 수만큼 출고 행을 추가합니다.",
+    title: "4. Excel 다운로드",
+    description: "기존 관리 Excel에 추가하려면 아래에서 파일을 먼저 첨부하세요. 첨부하지 않으면 내장된 빈 샘플 양식으로 새 Excel이 만들어집니다.",
   },
 ];
 
@@ -57,13 +57,13 @@ export function ManualModal({ open, onClose }: Props) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="manual-title"
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl"
+        className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl"
       >
         <header className="sticky top-0 flex items-start justify-between gap-4 border-b bg-white px-5 py-4">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600">Quick Guide</p>
             <h2 id="manual-title" className="mt-1 text-xl font-bold text-slate-900">사용 매뉴얼</h2>
-            <p className="mt-1 text-sm text-slate-500">패킹리스트를 출고요청서로 만드는 기본 작업 순서입니다.</p>
+            <p className="mt-1 text-sm text-slate-500">처음 사용하셔도 아래 순서대로 진행하면 됩니다.</p>
           </div>
           <button
             type="button"
@@ -89,24 +89,53 @@ export function ManualModal({ open, onClose }: Props) {
           </ol>
 
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-            <h3 className="font-semibold text-amber-900">검수 시 확인할 항목</h3>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-amber-900/80">
-              <li>Date와 AWB NO.는 Excel 생성에 필요한 필수값입니다.</li>
-              <li>Size 10, 12, 14, 16, 18 수량과 Total Qty가 일치하는지 확인하세요.</li>
-              <li>한 PDF에 품목이 여러 개면 합산하지 않고 품목마다 별도 출고 행으로 입력합니다.</li>
-              <li>PDF를 추가로 스캔해도 기존 결과는 유지되며, 최종 다운로드 때 모두 순서대로 반영됩니다.</li>
-              <li>기존 Excel에 AWB가 없으면 마지막 AWB 뒤에 Size 10~18의 새 열 블록을 자동 생성합니다.</li>
-              <li>빈 행이 없으면 합계 행 바로 위에 기존 스타일과 수식을 유지한 새 행을 삽입합니다.</li>
-              <li>첨부 Excel의 나머지 시트는 데이터를 입력하지 않고 기존 내용을 유지합니다.</li>
-              <li>Flight, Invoice, 중량 정보는 템플릿 전용 셀이 없어 검수 화면에만 유지됩니다.</li>
+            <div className="flex items-center gap-2 text-amber-900">
+              <AlertCircle size={19} />
+              <h3 className="font-semibold">다운로드 전에 꼭 확인하세요</h3>
+            </div>
+            <ul className="mt-3 list-disc space-y-1.5 pl-5 text-sm leading-6 text-amber-900/80">
+              <li><strong>Date</strong>와 <strong>AWB NO.</strong>가 비어 있으면 다운로드할 수 없습니다.</li>
+              <li>날짜가 인식되지 않았다면 Date 입력란의 달력에서 직접 선택하세요.</li>
+              <li>AWB는 예: <strong>618-5634-3420</strong> 형식인지 PDF와 비교하세요.</li>
+              <li>Size 10, 12, 14, 16, 18의 수량을 확인하고, 합계가 Total Qty와 맞는지 확인하세요.</li>
+              <li>OCR은 흐린 글씨나 작은 숫자를 잘못 읽을 수 있으므로 수량은 반드시 PDF와 한 번 비교해 주세요.</li>
             </ul>
           </div>
 
-          <div className="rounded-xl border border-slate-200 p-4">
-            <h3 className="font-semibold text-slate-900">편집 기능</h3>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              상품 추가, 상품 복사, 상품 삭제, 상품 초기화와 OCR 재실행을 사용할 수 있습니다.
-            </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-slate-200 p-4">
+              <h3 className="font-semibold text-slate-900">PDF가 여러 개인 경우</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                ‘스캔한 패킹리스트’ 목록에서 문서 이름을 누르면 해당 문서의 정보와 PDF가 함께 바뀝니다. 모든 문서를 하나씩 확인한 뒤 다운로드하세요.
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-4">
+              <h3 className="font-semibold text-slate-900">PDF 페이지 확인 방법</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                오른쪽 미리보기 위의 PAGE 버튼으로 페이지를 바꿀 수 있습니다. PDF가 길면 미리보기 영역 안에서 스크롤하세요.
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-4">
+              <h3 className="font-semibold text-slate-900">기존 Excel을 첨부하면</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                기존 출고요청서의 마지막 데이터 다음 행에 내용을 추가합니다. AWB 열이 없으면 Size 10~18 열을 새로 만들어 반영합니다.
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-4">
+              <h3 className="font-semibold text-slate-900">Excel을 첨부하지 않으면</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                내장된 빈 샘플 템플릿에 현재 PDF의 내용만 입력해 다운로드합니다. 원본 PDF나 업로드한 Excel 파일은 변경되지 않습니다.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+            <h3 className="font-semibold text-blue-900">문제가 생겼을 때</h3>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-blue-900/80">
+              <li>잘못 읽힌 값은 입력란에서 직접 수정하는 것이 가장 빠릅니다.</li>
+              <li>결과가 많이 틀렸다면 해당 문서를 선택한 뒤 <strong>OCR 재실행</strong>을 눌러 보세요.</li>
+              <li>오류가 발생하면 화면 알림창의 안내를 확인하고, 빠진 Date 또는 AWB를 먼저 입력하세요.</li>
+            </ul>
           </div>
         </div>
 
