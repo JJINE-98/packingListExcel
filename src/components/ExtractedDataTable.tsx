@@ -1,71 +1,144 @@
 import { Copy, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useFieldArray, type UseFormReturn } from "react-hook-form";
 import { createEmptyItem } from "../config/packingListFields";
-import { SIZE_KEYS, type PackingListData } from "../types/packingList";
+import type { PackingListData } from "../types/packingList";
 
 interface Props { form: UseFormReturn<PackingListData>; }
 
-const inputClass = "w-full min-w-24 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
+const inputClass = "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
+const excelSizes = ["10", "12", "14", "16", "18"] as const;
 
 export function ExtractedDataTable({ form }: Props) {
   const { register, control, getValues, resetField } = form;
   const { fields, append, remove } = useFieldArray({ control, name: "items" });
+  const [activeItem, setActiveItem] = useState(0);
 
-  const copyRow = (index: number) => {
-    const row = structuredClone(getValues(`items.${index}`));
+  useEffect(() => {
+    if (!fields.length) {
+      append(createEmptyItem());
+      setActiveItem(0);
+    } else if (activeItem >= fields.length) {
+      setActiveItem(fields.length - 1);
+    }
+  }, [activeItem, append, fields.length]);
+
+  const addItem = () => {
+    append(createEmptyItem());
+    setActiveItem(fields.length);
+  };
+
+  const copyItem = () => {
+    const row = structuredClone(getValues(`items.${activeItem}`));
     row.id = crypto.randomUUID();
     append(row);
+    setActiveItem(fields.length);
+  };
+
+  const removeItem = () => {
+    if (fields.length <= 1) {
+      resetField(`items.${activeItem}`, { defaultValue: createEmptyItem() });
+      return;
+    }
+    remove(activeItem);
+    setActiveItem(Math.max(0, activeItem - 1));
   };
 
   return (
-    <div className="overflow-hidden rounded-xl border bg-white">
-      <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-3">
-        <div>
-          <h3 className="font-semibold text-slate-900">상품 및 사이즈별 수량</h3>
-          <p className="text-xs text-slate-500">인식 오류를 직접 수정할 수 있습니다.</p>
+    <section className="overflow-hidden rounded-2xl border bg-white shadow-card">
+      <div className="border-b bg-slate-50 px-4 pt-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="font-semibold text-slate-900">상품별 출고 정보</h3>
+            <p className="text-xs text-slate-500">상품 탭을 선택해 Excel에 반영될 값만 검수하세요.</p>
+          </div>
+          <button type="button" onClick={addItem} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+            <Plus size={16} /> 상품 추가
+          </button>
         </div>
-        <button type="button" onClick={() => append(createEmptyItem())} className="inline-flex items-center gap-1 rounded-md border bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50">
-          <Plus size={16} /> 행 추가
-        </button>
+        <div className="flex gap-1 overflow-x-auto">
+          {fields.map((field, index) => {
+            const item = getValues(`items.${index}`);
+            const label = item?.variety || item?.productName || `상품 ${index + 1}`;
+            return (
+              <button
+                key={field.id}
+                type="button"
+                onClick={() => setActiveItem(index)}
+                className={`whitespace-nowrap rounded-t-lg border border-b-0 px-4 py-2.5 text-sm font-semibold ${
+                  activeItem === index
+                    ? "border-slate-300 bg-white text-blue-700"
+                    : "border-transparent bg-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </div>
-      <div className="overflow-x-auto">
-        <table className="min-w-[1650px] border-collapse text-left">
-          <thead className="bg-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-600">
-            <tr>
-              {["Customer", "Product Name", "Variety", "Grade", "Size/KG", ...SIZE_KEYS.map((v) => `Size ${v}`), "Total Qty", "Net Weight", "Gross Weight", "Remarks", "작업"].map((label) => (
-                <th key={label} className="border-b border-r px-2 py-2">{label}</th>
+
+      {fields[activeItem] && (
+        <div className="space-y-5 p-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="text-xs font-semibold text-slate-600">
+              Product Name
+              <input className={inputClass} {...register(`items.${activeItem}.productName`)} />
+            </label>
+            <label className="text-xs font-semibold text-slate-600">
+              Variety
+              <input className={inputClass} {...register(`items.${activeItem}.variety`)} />
+            </label>
+            <label className="text-xs font-semibold text-slate-600">
+              Grade
+              <input className={inputClass} {...register(`items.${activeItem}.grade`)} />
+            </label>
+          </div>
+
+          <div>
+            <div className="mb-2 text-xs font-semibold text-slate-600">사이즈별 수량</div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              {excelSizes.map((size) => (
+                <label key={size} className="rounded-xl border bg-slate-50 p-3 text-xs font-semibold text-slate-600">
+                  Size {size}
+                  <input
+                    type="number"
+                    min="0"
+                    className={inputClass}
+                    {...register(`items.${activeItem}.quantities.${size}`, { setValueAs: (value) => value === "" ? "" : Number(value) })}
+                  />
+                </label>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {fields.map((field, index) => (
-              <tr key={field.id} className="align-top hover:bg-blue-50/40">
-                <td className="border-b border-r p-1"><input className={inputClass} {...register(`items.${index}.customer`)} /></td>
-                <td className="border-b border-r p-1"><input className={inputClass} {...register(`items.${index}.productName`)} /></td>
-                <td className="border-b border-r p-1"><input className={inputClass} {...register(`items.${index}.variety`)} /></td>
-                <td className="border-b border-r p-1"><input className={inputClass} {...register(`items.${index}.grade`)} /></td>
-                <td className="border-b border-r p-1"><input type="number" className={inputClass} {...register(`items.${index}.sizeKg`, { setValueAs: (v) => v === "" ? "" : Number(v) })} /></td>
-                {SIZE_KEYS.map((size) => (
-                  <td key={size} className="border-b border-r p-1">
-                    <input type="number" min="0" className={inputClass} {...register(`items.${index}.quantities.${size}`, { setValueAs: (v) => v === "" ? "" : Number(v) })} />
-                  </td>
-                ))}
-                <td className="border-b border-r p-1"><input type="number" className={inputClass} {...register(`items.${index}.totalQuantity`, { setValueAs: (v) => v === "" ? "" : Number(v) })} /></td>
-                <td className="border-b border-r p-1"><input type="number" className={inputClass} {...register(`items.${index}.netWeight`, { setValueAs: (v) => v === "" ? "" : Number(v) })} /></td>
-                <td className="border-b border-r p-1"><input type="number" className={inputClass} {...register(`items.${index}.grossWeight`, { setValueAs: (v) => v === "" ? "" : Number(v) })} /></td>
-                <td className="border-b border-r p-1"><input className={inputClass} {...register(`items.${index}.remarks`)} /></td>
-                <td className="border-b p-2">
-                  <div className="flex gap-1">
-                    <button type="button" title="행 복사" onClick={() => copyRow(index)} className="rounded p-1.5 hover:bg-slate-200"><Copy size={16} /></button>
-                    <button type="button" title="행 초기화" onClick={() => resetField(`items.${index}`, { defaultValue: createEmptyItem() })} className="rounded p-1.5 hover:bg-slate-200"><RotateCcw size={16} /></button>
-                    <button type="button" title="행 삭제" onClick={() => remove(index)} className="rounded p-1.5 text-red-600 hover:bg-red-50"><Trash2 size={16} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+              <label className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs font-semibold text-blue-700">
+                Total Qty
+                <input
+                  type="number"
+                  min="0"
+                  className={inputClass}
+                  {...register(`items.${activeItem}.totalQuantity`, { setValueAs: (value) => value === "" ? "" : Number(value) })}
+                />
+              </label>
+            </div>
+          </div>
+
+          <label className="block text-xs font-semibold text-slate-600">
+            Remarks
+            <input className={inputClass} {...register(`items.${activeItem}.remarks`)} />
+          </label>
+
+          <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
+            <button type="button" onClick={copyItem} className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+              <Copy size={16} /> 상품 복사
+            </button>
+            <button type="button" onClick={() => resetField(`items.${activeItem}`, { defaultValue: createEmptyItem() })} className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+              <RotateCcw size={16} /> 상품 초기화
+            </button>
+            <button type="button" onClick={removeItem} className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50">
+              <Trash2 size={16} /> 상품 삭제
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

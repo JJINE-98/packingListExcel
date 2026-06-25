@@ -1,24 +1,23 @@
 import { FileSpreadsheet, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useRef } from "react";
 
 interface Props {
   file: File | null;
   disabled?: boolean;
   onFile: (file: File | null) => void;
+  onError?: (message: string) => void;
 }
 
-export function ExcelUploader({ file, disabled, onFile }: Props) {
+export function ExcelUploader({ file, disabled, onFile, onError }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [error, setError] = useState("");
 
   const accept = (selected?: File) => {
     if (!selected) return;
     const isXlsx = selected.name.toLowerCase().endsWith(".xlsx");
     if (!isXlsx) {
-      setError(".xlsx 형식의 Excel 파일만 사용할 수 있습니다.");
+      onError?.(".xlsx 형식의 Excel 파일만 사용할 수 있습니다.");
       return;
     }
-    setError("");
     onFile(selected);
   };
 
@@ -64,7 +63,6 @@ export function ExcelUploader({ file, disabled, onFile }: Props) {
           {file ? "Excel 변경" : "Excel 첨부"}
         </button>
       </div>
-      {error && <p className="mt-2 text-xs font-semibold text-red-600">{error}</p>}
     </section>
   );
 }

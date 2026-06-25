@@ -1,5 +1,6 @@
 import { createEmptyItem, createEmptyPackingList } from "../config/packingListFields";
 import { SIZE_KEYS, type PackingListData, type SizeKey } from "../types/packingList";
+import { normalizeDateInput } from "../utils/excelUtils";
 
 const firstMatch = (text: string, patterns: RegExp[]) => {
   for (const pattern of patterns) {
@@ -50,7 +51,7 @@ export function extractPackingList(rawText: string): PackingListData {
   const data = createEmptyPackingList();
   const item = createEmptyItem();
 
-  data.date = firstMatch(text, [/Date[ \t]*[:.]?[ \t]*([0-9]{1,2}[ \t]+[A-Za-z]{3}\.?,?[ \t]*[0-9]{4})/i]);
+  data.date = normalizeDateInput(firstMatch(text, [/Date[ \t]*[:.]?[ \t]*([0-9]{1,2}[ \t]+[A-Za-z]{3}\.?,?[ \t]*[0-9]{4})/i]));
   data.invoiceNo = firstMatch(text, [/Invoice[ \t]*(?:Ref\.?[ \t]*)?No\.?[ \t]*[:.]?[ \t]*([A-Z0-9-]+)/i]);
   data.flight = firstMatch(text, [/Flight(?:[ \t]*No\.?)?[ \t]*[:.]?[ \t]*([A-Z0-9/-]+)/i]);
   data.destination = cleanCountry(

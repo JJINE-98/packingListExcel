@@ -15,12 +15,12 @@ const steps = [
   {
     icon: ScanText,
     title: "2. OCR 분석",
-    description: "PDF 페이지를 이미지로 변환한 뒤 OCR을 실행합니다. 진행률과 인식 원문을 확인할 수 있습니다.",
+    description: "PDF 페이지를 이미지로 변환한 뒤 OCR을 실행합니다. 화면의 진행률로 처리 상태를 확인할 수 있습니다.",
   },
   {
     icon: FileCheck2,
     title: "3. 결과 검수",
-    description: "스캔 목록에서 문서를 선택해 기본 정보와 품목별 수량을 확인하고, 오인식된 값은 표에서 직접 수정합니다.",
+    description: "스캔 목록에서 문서를 선택하면 해당 PDF와 출고 정보가 표시됩니다. 상품 탭을 이동하며 값을 직접 수정할 수 있습니다.",
   },
   {
     icon: FileDown,

@@ -5,23 +5,23 @@ import { isPdfFile } from "../utils/pdfUtils";
 interface Props {
   disabled?: boolean;
   onFiles: (files: File[]) => Promise<void>;
+  onError?: (message: string) => void;
 }
 
-export function FileUploader({ disabled, onFiles }: Props) {
+export function FileUploader({ disabled, onFiles, onError }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [name, setName] = useState("");
-  const [error, setError] = useState("");
 
   const accept = async (files: File[]) => {
     if (!files.length) return;
     try {
-      setError("");
       if (files.some((file) => !isPdfFile(file))) throw new Error("PDF 파일만 업로드할 수 있습니다.");
       setName(files.length === 1 ? files[0].name : `${files.length}개 PDF 선택됨`);
       await onFiles(files);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "파일 업로드에 실패했습니다.");
+      const message = cause instanceof Error ? cause.message : "파일 업로드에 실패했습니다.";
+      onError?.(message);
     }
   };
 
@@ -62,7 +62,6 @@ export function FileUploader({ disabled, onFiles }: Props) {
         </div>
         <FileUp className="text-slate-300" size={28} />
       </div>
-      {error && <p className="mt-2 text-xs font-medium text-red-600">{error}</p>}
     </div>
   );
 }

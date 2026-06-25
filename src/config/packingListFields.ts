@@ -25,7 +25,7 @@ export const createEmptyPackingList = (): PackingListData => ({
 });
 
 export const SAMPLE_DATA: PackingListData = {
-  date: "06 Jun., 2026",
+  date: "2026-06-06",
   invoiceNo: "9B-060626-SQRXKR-1",
   flight: "SQ705-SQ606/07-06-2026",
   destination: "KOREA",
