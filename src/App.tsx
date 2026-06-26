@@ -8,6 +8,7 @@ import {
   FileText,
   RefreshCcw,
   RotateCcw,
+  ScanSearch,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -472,17 +473,25 @@ export default function App() {
               className="flex min-h-0 self-start flex-col overflow-hidden rounded-2xl border bg-white p-4 shadow-card"
               style={leftPanelHeight ? { height: leftPanelHeight } : undefined}
             >
-              <div className="mb-3">
-                <h2 className="font-semibold">PDF 미리보기</h2>
-                <p className="text-xs text-slate-500">{activeDocument >= 0 ? documentNames[activeDocument] : "선택된 문서가 없습니다."}</p>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="font-semibold">PDF 미리보기</h2>
+                  <p className="truncate text-xs text-slate-500">{activeDocument >= 0 ? documentNames[activeDocument] : "선택된 문서가 없습니다."}</p>
+                </div>
+                <button
+                  type="button"
+                  disabled={ocr.isProcessing || activeDocument < 0}
+                  onClick={() => void analyzeSelectedPage()}
+                  className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white shadow-sm hover:bg-slate-700 disabled:opacity-45"
+                >
+                  <ScanSearch size={16} /> 현재 페이지 OCR 분석
+                </button>
               </div>
               <div className="min-h-0 flex-1">
                 <PdfPreview
                   pageUrls={activePageUrls}
                   activePage={activePdfPage}
-                  disabled={ocr.isProcessing || activeDocument < 0}
                   onActivePage={setActivePdfPage}
-                  onAnalyzePage={() => void analyzeSelectedPage()}
                 />
               </div>
             </section>
