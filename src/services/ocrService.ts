@@ -326,6 +326,84 @@ export class TesseractOcrProvider implements IOcrProvider {
       .slice(0, 3);
   }
 
+  private mergeNumericCandidates(
+    current: Map<string, Array<{ value: number; confidence: number }>>,
+    key: string,
+    nextCandidates: Array<{ value: number; confidence: number }>,
+    confidenceBias = 0,
+  ) {
+    const merged = new Map<number, number>();
+    for (const candidate of current.get(key) ?? []) {
+      merged.set(candidate.value, Math.max(merged.get(candidate.value) ?? 0, candidate.confidence));
+    }
+    for (const candidate of nextCandidates) {
+      merged.set(candidate.value, Math.max(merged.get(candidate.value) ?? 0, candidate.confidence + confidenceBias));
+    }
+    current.set(
+      key,
+      [...merged.entries()]
+        .map(([value, confidence]) => ({ value, confidence }))
+        .sort((first, second) => second.confidence - first.confidence)
+        .slice(0, 6),
+    );
+  }
+
+  private async recognizeWideProductRow(worker: Worker, bitmap: ImageBitmap | HTMLCanvasElement) {
+    const rowVariants: Rect[] = [
+      [0.30, 0.405, 0.84, 0.475],
+      [0.30, 0.425, 0.84, 0.495],
+      [0.30, 0.445, 0.84, 0.515],
+    ];
+    const rows: number[][] = [];
+    await worker.setParameters({
+      tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
+      tessedit_char_whitelist: "0123456789 .,\n",
+      preserve_interword_spaces: "1",
+      user_defined_dpi: "300",
+    });
+    for (const rect of rowVariants) {
+      const result = await worker.recognize(this.createCellCanvas(bitmap, rect, true, 0, 4));
+      const numbers = result.data.text
+        .replace(/,/g, "")
+        .match(/\d{1,5}/g)
+        ?.map(Number)
+        .filter((value) => Number.isFinite(value)) ?? [];
+      if (numbers.length >= 4) rows.push(numbers);
+    }
+    return rows;
+  }
+
+  private applyWideRowCandidates(
+    candidates: Map<string, Array<{ value: number; confidence: number }>>,
+    rows: number[][],
+  ) {
+    for (const numbers of rows) {
+      const totalIndex = numbers.findIndex((value, index) =>
+        value >= 10 &&
+        numbers.slice(0, index).some((candidate) => candidate >= 1 && candidate <= 20) &&
+        numbers.slice(index + 1).some((candidate) => candidate >= value * 3),
+      );
+      if (totalIndex < 0) continue;
+      const total = numbers[totalIndex];
+      const sizeKgIndex = numbers.slice(0, totalIndex).findIndex((value) => value >= 1 && value <= 20);
+      const quantityValues = numbers
+        .slice(sizeKgIndex >= 0 ? sizeKgIndex + 1 : 0, totalIndex)
+        .filter((value) => value > 0 && value < total);
+      if (!quantityValues.length) continue;
+      const sum = quantityValues.reduce((acc, value) => acc + value, 0);
+      if (sum !== total) continue;
+
+      this.mergeNumericCandidates(candidates, "TOTAL_QUANTITY", [{ value: total, confidence: 130 }]);
+      if (sizeKgIndex >= 0) this.mergeNumericCandidates(candidates, "SIZE_KG", [{ value: numbers[sizeKgIndex], confidence: 120 }]);
+
+      const likelyFilledSizes = ["SIZE_10", "SIZE_12", "SIZE_14", "SIZE_16", "SIZE_18"];
+      const offset = quantityValues.length === 3 ? 1 : 0;
+      quantityValues.forEach((value, index) => {
+        this.mergeNumericCandidates(candidates, likelyFilledSizes[offset + index], [{ value, confidence: 125 }]);
+      });
+    }
+  }
+
   private chooseQuantityCandidates(
     candidates: Map<string, Array<{ value: number; confidence: number }>>,
   ) {
@@ -353,7 +431,7 @@ export class TesseractOcrProvider implements IOcrProvider {
     ]);
     for (const key of sizeKeys) {
       const recognized = candidates.get(key) ?? [];
-      const options = recognized.length ? recognized : [{ value: 0, confidence: 0 }];
+      const options = recognized.length ? [{ value: 0, confidence: 5 }, ...recognized] : [{ value: 0, confidence: 0 }];
       const next = new Map<number, { values: number[]; confidence: number }>();
       for (const [sum, state] of states) {
         for (const option of options) {
@@ -394,6 +472,8 @@ export class TesseractOcrProvider implements IOcrProvider {
   private async recognizePackingTable(image: Blob) {
     const worker = await this.getWorker();
     const bitmap = await createImageBitmap(image);
+    const alignedBitmap = this.deskewBitmap(bitmap);
+    const alignment = this.detectTableAlignment(alignedBitmap);
     const cells = [
       { key: "DATE", rect: [0.348, 0.252, 0.842, 0.276], numeric: false },
       { key: "CUSTOMER", rect: [0.052, 0.431, 0.142, 0.466], numeric: false },
@@ -423,11 +503,27 @@ export class TesseractOcrProvider implements IOcrProvider {
         user_defined_dpi: "300",
       });
       if (cell.numeric) {
-        numericCandidates.set(cell.key, await this.recognizeNumericCandidates(worker, bitmap, cell.rect));
+        this.mergeNumericCandidates(
+          numericCandidates,
+          cell.key,
+          await this.recognizeNumericCandidates(worker, bitmap, cell.rect),
+          15,
+        );
+        if (alignment) {
+          this.mergeNumericCandidates(
+            numericCandidates,
+            cell.key,
+            await this.recognizeNumericCandidates(worker, alignedBitmap, this.transformRect(cell.rect, alignment)),
+          );
+        }
       } else {
         const result = await worker.recognize(this.createCellCanvas(bitmap, cell.rect));
         values.push(`${cell.key}: ${result.data.text.replace(/\s+/g, " ").trim()}`);
       }
+    }
+    this.applyWideRowCandidates(numericCandidates, await this.recognizeWideProductRow(worker, bitmap));
+    if (alignedBitmap !== bitmap) {
+      this.applyWideRowCandidates(numericCandidates, await this.recognizeWideProductRow(worker, alignedBitmap));
     }
     const selectedNumbers = this.chooseQuantityCandidates(numericCandidates);
     for (const cell of cells.filter((candidate) => candidate.numeric)) {
