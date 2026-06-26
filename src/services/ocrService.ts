@@ -2,6 +2,8 @@ import { createWorker, PSM, type Worker } from "tesseract.js";
 import type { OcrProgress, OcrResult } from "../types/packingList";
 import { extractPackingList } from "./extractionService";
 
+type Rect = readonly [number, number, number, number];
+
 export interface IOcrProvider {
   extractText(images: Blob[], onProgress?: (progress: OcrProgress) => void): Promise<string>;
   extractFields(text: string): Promise<OcrResult>;
@@ -13,6 +15,110 @@ export class TesseractOcrProvider implements IOcrProvider {
   private activePage = 1;
   private totalPages = 1;
   private onProgress?: (progress: OcrProgress) => void;
+
+  private detectLineClusters(scores: number[], threshold: number) {
+    const clusters: Array<{ start: number; end: number; peak: number; score: number }> = [];
+    let start = -1;
+    let peak = 0;
+    let score = 0;
+    for (let index = 0; index <= scores.length; index += 1) {
+      const current = scores[index] ?? 0;
+      if (current >= threshold) {
+        if (start < 0) {
+          start = index;
+          peak = index;
+          score = current;
+        } else if (current > score) {
+          peak = index;
+          score = current;
+        }
+      } else if (start >= 0) {
+        clusters.push({ start, end: index - 1, peak, score });
+        start = -1;
+      }
+    }
+    return clusters;
+  }
+
+  private detectTableAlignment(source: ImageBitmap | HTMLCanvasElement) {
+    const canvas = document.createElement("canvas");
+    const scale = 700 / source.width;
+    canvas.width = 700;
+    canvas.height = Math.round(source.height * scale);
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return undefined;
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+    const image = context.getImageData(0, 0, canvas.width, canvas.height);
+    const rowScores = new Array<number>(canvas.height).fill(0);
+    const colScores = new Array<number>(canvas.width).fill(0);
+
+    for (let y = 0; y < canvas.height; y += 1) {
+      for (let x = 0; x < canvas.width; x += 1) {
+        const index = (y * canvas.width + x) * 4;
+        const grey = image.data[index] * 0.299 + image.data[index + 1] * 0.587 + image.data[index + 2] * 0.114;
+        if (grey < 115) {
+          rowScores[y] += 1;
+          colScores[x] += 1;
+        }
+      }
+    }
+
+    const horizontal = this.detectLineClusters(rowScores, canvas.width * 0.28)
+      .filter((line) => line.peak > canvas.height * 0.1 && line.peak < canvas.height * 0.82);
+    if (horizontal.length < 6) return undefined;
+    const top = horizontal[0].peak;
+    const bottom = horizontal[horizontal.length - 1].peak;
+    if (bottom <= top) return undefined;
+
+    const colScoresInTable = new Array<number>(canvas.width).fill(0);
+    for (let y = top; y <= bottom; y += 1) {
+      for (let x = 0; x < canvas.width; x += 1) {
+        const index = (y * canvas.width + x) * 4;
+        const grey = image.data[index] * 0.299 + image.data[index + 1] * 0.587 + image.data[index + 2] * 0.114;
+        if (grey < 115) colScoresInTable[x] += 1;
+      }
+    }
+    const vertical = this.detectLineClusters(colScoresInTable, (bottom - top) * 0.16)
+      .filter((line) => line.peak > canvas.width * 0.02 && line.peak < canvas.width * 0.98);
+    if (vertical.length < 6) return undefined;
+
+    const left = vertical[0].peak;
+    const right = vertical[vertical.length - 1].peak;
+    if (right <= left) return undefined;
+
+    const expected = {
+      left: 0.052,
+      right: 0.915,
+      top: 0.186,
+      bottom: 0.585,
+    };
+    return {
+      expected,
+      detected: {
+        left: left / canvas.width,
+        right: right / canvas.width,
+        top: top / canvas.height,
+        bottom: bottom / canvas.height,
+      },
+    };
+  }
+
+  private transformRect(rect: Rect, alignment?: ReturnType<TesseractOcrProvider["detectTableAlignment"]>): Rect {
+    if (!alignment) return rect;
+    const { expected, detected } = alignment;
+    const mapX = (value: number) =>
+      detected.left + ((value - expected.left) / (expected.right - expected.left)) * (detected.right - detected.left);
+    const mapY = (value: number) =>
+      detected.top + ((value - expected.top) / (expected.bottom - expected.top)) * (detected.bottom - detected.top);
+    return [
+      Math.min(0.98, Math.max(0, mapX(rect[0]))),
+      Math.min(0.98, Math.max(0, mapY(rect[1]))),
+      Math.min(1, Math.max(0.02, mapX(rect[2]))),
+      Math.min(1, Math.max(0.02, mapY(rect[3]))),
+    ];
+  }
 
   private estimateSkewAngle(source: ImageBitmap) {
     const sampleWidth = 720;
@@ -98,7 +204,7 @@ export class TesseractOcrProvider implements IOcrProvider {
 
   private createCellCanvas(
     bitmap: ImageBitmap | HTMLCanvasElement,
-    ratios: readonly [number, number, number, number],
+    ratios: Rect,
     binary = false,
     insetFactor = 0,
     scale = 5,
@@ -190,7 +296,7 @@ export class TesseractOcrProvider implements IOcrProvider {
   private async recognizeNumericCandidates(
     worker: Worker,
     bitmap: ImageBitmap | HTMLCanvasElement,
-    rect: readonly [number, number, number, number],
+    rect: Rect,
   ) {
     const candidates = new Map<number, number>();
     const variants = [
@@ -289,6 +395,7 @@ export class TesseractOcrProvider implements IOcrProvider {
     const worker = await this.getWorker();
     const bitmap = await createImageBitmap(image);
     const tableImage = this.deskewBitmap(bitmap);
+    const alignment = this.detectTableAlignment(tableImage);
     const cells = [
       { key: "DATE", rect: [0.348, 0.252, 0.842, 0.276], numeric: false },
       { key: "CUSTOMER", rect: [0.052, 0.431, 0.142, 0.466], numeric: false },
@@ -318,9 +425,9 @@ export class TesseractOcrProvider implements IOcrProvider {
         user_defined_dpi: "300",
       });
       if (cell.numeric) {
-        numericCandidates.set(cell.key, await this.recognizeNumericCandidates(worker, tableImage, cell.rect));
+        numericCandidates.set(cell.key, await this.recognizeNumericCandidates(worker, tableImage, this.transformRect(cell.rect, alignment)));
       } else {
-        const result = await worker.recognize(this.createCellCanvas(tableImage, cell.rect));
+        const result = await worker.recognize(this.createCellCanvas(tableImage, this.transformRect(cell.rect, alignment)));
         values.push(`${cell.key}: ${result.data.text.replace(/\s+/g, " ").trim()}`);
       }
     }

@@ -21,6 +21,7 @@ import { useOcr } from "./hooks/useOcr";
 import type { PackingListData } from "./types/packingList";
 
 const fieldClass = "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
+const defaultPdfPageIndex = (pageCount: number) => Math.max(0, Math.min(4, pageCount - 1));
 
 interface ToastState {
   id: number;
@@ -98,11 +99,13 @@ export default function App() {
     const nextActive = next.length - 1;
     const activeProcessed = processed[processed.length - 1];
     setActiveDocument(nextActive);
-    setActivePdfPage(activeProcessed?.defaultOcrPageIndex ?? 0);
+    setActivePdfPage(activeProcessed?.defaultOcrPageIndex ?? defaultPdfPageIndex(activeProcessed?.pageUrls.length ?? 0));
     if (nextActive >= 0) form.reset(next[nextActive]);
     showToast(
       processed.some(({ result }) => result)
         ? `${processed.length}개 PDF를 추가하고 기본 PAGE 5 OCR을 완료했습니다. 다른 페이지가 패킹리스트라면 현재 페이지 OCR 분석을 눌러주세요.`
+        : processed.some(({ defaultOcrError }) => defaultOcrError)
+          ? `${processed.length}개 PDF를 추가했지만 기본 PAGE 5 OCR은 실패했습니다. 필요한 페이지를 선택한 뒤 현재 페이지 OCR 분석을 눌러주세요.`
         : `${processed.length}개 PDF를 추가했습니다. 오른쪽에서 필요한 페이지를 선택한 뒤 OCR 분석을 눌러주세요.`,
     );
   };
@@ -111,7 +114,7 @@ export default function App() {
     const next = currentDocuments();
     setDocuments(next);
     setActiveDocument(index);
-    setActivePdfPage(0);
+    setActivePdfPage(defaultPdfPageIndex(documentPageUrls[index]?.length ?? 0));
     form.reset(next[index]);
   };
 
@@ -134,7 +137,7 @@ export default function App() {
     }
     const nextActive = Math.min(index, next.length - 1);
     setActiveDocument(nextActive);
-    setActivePdfPage(0);
+    setActivePdfPage(defaultPdfPageIndex(nextUrls[nextActive]?.length ?? 0));
     form.reset(next[nextActive]);
   };
 

@@ -7,6 +7,7 @@ import { normalizeAwb } from "../utils/excelUtils";
 export interface ProcessedPdf {
   result?: OcrResult;
   defaultOcrPageIndex?: number;
+  defaultOcrError?: string;
   pageImages: Blob[];
   pageUrls: string[];
 }
@@ -36,22 +37,28 @@ export function useOcr() {
         const rendered = await renderPdf(files[index]);
         const defaultOcrPage = rendered.pageImages[DEFAULT_OCR_PAGE_INDEX];
         let result: OcrResult | undefined;
+        let defaultOcrError: string | undefined;
         if (defaultOcrPage) {
-          const selectedPage = [defaultOcrPage];
-          setLatestPageImages(selectedPage);
-          const rawText = await provider.current.extractText(selectedPage, (progress) => {
-            setProgress({
-              ...progress,
-              percent: Math.round(((index + progress.percent / 100) / files.length) * 100),
-              status: `PDF ${index + 1}/${files.length} · 기본 PAGE 5 ${progress.status}`,
+          try {
+            const selectedPage = [defaultOcrPage];
+            setLatestPageImages(selectedPage);
+            const rawText = await provider.current.extractText(selectedPage, (progress) => {
+              setProgress({
+                ...progress,
+                percent: Math.round(((index + progress.percent / 100) / files.length) * 100),
+                status: `PDF ${index + 1}/${files.length} · 기본 PAGE 5 ${progress.status}`,
+              });
             });
-          });
-          result = await provider.current.extractFields(rawText);
-          result.data.awbNo = normalizeAwb(result.data.awbNo);
+            result = await provider.current.extractFields(rawText);
+            result.data.awbNo = normalizeAwb(result.data.awbNo);
+          } catch (cause) {
+            defaultOcrError = cause instanceof Error ? cause.message : "기본 PAGE 5 OCR 분석에 실패했습니다.";
+          }
         }
         processed.push({
           result,
           defaultOcrPageIndex: defaultOcrPage ? DEFAULT_OCR_PAGE_INDEX : undefined,
+          defaultOcrError,
           pageImages: rendered.pageImages,
           pageUrls: rendered.pageUrls,
         });
