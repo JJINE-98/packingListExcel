@@ -22,11 +22,22 @@ import type { PackingListData } from "./types/packingList";
 
 const fieldClass = "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
 const defaultPdfPageIndex = (pageCount: number) => Math.max(0, Math.min(4, pageCount - 1));
+const excelSizeKeys = ["10", "12", "14", "16", "18"] as const;
 
 interface ToastState {
   id: number;
   message: string;
   type: "success" | "error";
+}
+
+function quantityMismatch(document: PackingListData) {
+  const sizeTotal = document.items.reduce((documentSum, item) =>
+    documentSum + excelSizeKeys.reduce((itemSum, size) => itemSum + Number(item.quantities[size] || 0), 0),
+  0);
+  const totalQty = document.items.reduce((sum, item) => sum + Number(item.totalQuantity || 0), 0);
+  return sizeTotal !== totalQty
+    ? { sizeTotal, totalQty }
+    : undefined;
 }
 
 export default function App() {
@@ -197,6 +208,23 @@ export default function App() {
       if (activeDocument >= 0 && next[activeDocument]) next[activeDocument] = data;
       if (!next.length) next.push(data);
       setDocuments(next);
+      const mismatchIndex = next.findIndex((document) => quantityMismatch(document));
+      if (mismatchIndex >= 0) {
+        const mismatch = quantityMismatch(next[mismatchIndex])!;
+        setActiveDocument(mismatchIndex);
+        setActivePdfPage(defaultPdfPageIndex(documentPageUrls[mismatchIndex]?.length ?? 0));
+        form.reset(next[mismatchIndex]);
+        window.setTimeout(() => {
+          leftPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+          form.setFocus("items.0.totalQuantity");
+        }, 50);
+        const label = next[mismatchIndex].awbNo || documentNames[mismatchIndex] || `문서 ${mismatchIndex + 1}`;
+        showToast(
+          `${label}의 사이즈별 수량 합계(${mismatch.sizeTotal})와 Total Qty(${mismatch.totalQty})가 다릅니다. 값을 확인해 주세요.`,
+          "error",
+        );
+        return;
+      }
       await excel.exportExcel(next, managedExcel);
       showToast(managedExcel
         ? "기존 Excel에 AWB 열 블록과 상품 행을 반영해 다운로드했습니다."
