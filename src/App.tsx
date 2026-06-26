@@ -43,6 +43,13 @@ function quantityMismatch(document: PackingListData) {
     : undefined;
 }
 
+function clearResolvedReviewWarnings(document: PackingListData) {
+  if (!document.reviewWarnings?.length || quantityMismatch(document)) return document;
+  const next = structuredClone(document);
+  delete next.reviewWarnings;
+  return next;
+}
+
 function normalizedAwbKey(awbNo: string) {
   return awbNo.replace(/\D/g, "");
 }
@@ -151,7 +158,7 @@ export default function App() {
   };
 
   const visibleDocuments = documents.map((document, index) =>
-    index === activeDocument ? watchedForm : document,
+    clearResolvedReviewWarnings(index === activeDocument ? watchedForm : document),
   );
   const awbCounts = visibleDocuments.reduce<Record<string, number>>((counts, document) => {
     const key = normalizedAwbKey(document.awbNo);
@@ -262,8 +269,9 @@ export default function App() {
 
   const download = form.handleSubmit(async (data) => {
     try {
-      const next = documents.map((document) => structuredClone(document));
+      const next = documents.map((document) => clearResolvedReviewWarnings(document));
       if (activeDocument >= 0 && next[activeDocument]) next[activeDocument] = data;
+      if (activeDocument >= 0 && next[activeDocument]) next[activeDocument] = clearResolvedReviewWarnings(next[activeDocument]);
       if (!next.length) next.push(data);
       setDocuments(next);
       const nextAwbCounts = next.reduce<Record<string, number>>((counts, document) => {
