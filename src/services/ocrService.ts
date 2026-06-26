@@ -394,8 +394,6 @@ export class TesseractOcrProvider implements IOcrProvider {
   private async recognizePackingTable(image: Blob) {
     const worker = await this.getWorker();
     const bitmap = await createImageBitmap(image);
-    const tableImage = this.deskewBitmap(bitmap);
-    const alignment = this.detectTableAlignment(tableImage);
     const cells = [
       { key: "DATE", rect: [0.348, 0.252, 0.842, 0.276], numeric: false },
       { key: "CUSTOMER", rect: [0.052, 0.431, 0.142, 0.466], numeric: false },
@@ -425,9 +423,9 @@ export class TesseractOcrProvider implements IOcrProvider {
         user_defined_dpi: "300",
       });
       if (cell.numeric) {
-        numericCandidates.set(cell.key, await this.recognizeNumericCandidates(worker, tableImage, this.transformRect(cell.rect, alignment)));
+        numericCandidates.set(cell.key, await this.recognizeNumericCandidates(worker, bitmap, cell.rect));
       } else {
-        const result = await worker.recognize(this.createCellCanvas(tableImage, this.transformRect(cell.rect, alignment)));
+        const result = await worker.recognize(this.createCellCanvas(bitmap, cell.rect));
         values.push(`${cell.key}: ${result.data.text.replace(/\s+/g, " ").trim()}`);
       }
     }

@@ -371,24 +371,22 @@ export default function App() {
       <main className="mx-auto max-w-[1800px] space-y-5 p-5">
         <FileUploader disabled={ocr.isProcessing} onFiles={processFiles} onError={(message) => showToast(message, "error")} />
 
-        <section className="grid gap-3 md:grid-cols-5">
+        <section className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-card">
           {[
-            { label: "총 문서", value: statusSummary.total, icon: FileText, tone: "border-slate-200 bg-white text-slate-700" },
+            { label: "총 문서", value: statusSummary.total, icon: FileText, tone: "border-slate-200 bg-slate-50 text-slate-700" },
             { label: "정상", value: statusSummary.complete, icon: CheckCircle2, tone: "border-emerald-200 bg-emerald-50 text-emerald-700" },
             { label: "확인 필요", value: statusSummary.needsCheck, icon: AlertTriangle, tone: "border-amber-200 bg-amber-50 text-amber-700" },
             { label: "필수값 미입력", value: statusSummary.missing, icon: AlertCircle, tone: "border-slate-200 bg-slate-100 text-slate-600" },
-            { label: "중복 AWB", value: statusSummary.duplicate, icon: FileCheck2, tone: statusSummary.duplicate ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 bg-white text-slate-600" },
+            { label: "중복 AWB", value: statusSummary.duplicate, icon: FileCheck2, tone: statusSummary.duplicate ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 bg-slate-50 text-slate-600" },
           ].map((item) => {
             const Icon = item.icon;
             return (
-              <div key={item.label} className={`rounded-xl border px-4 py-3 shadow-sm ${item.tone}`}>
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] opacity-75">{item.label}</p>
-                    <p className="mt-1 font-mono text-2xl font-black tabular-nums">{item.value}</p>
-                  </div>
-                  <Icon size={22} className="opacity-70" />
+              <div key={item.label} className={`inline-flex min-w-[128px] items-center justify-between gap-3 rounded-xl border px-3 py-2 ${item.tone}`}>
+                <div className="inline-flex items-center gap-2">
+                  <Icon size={15} className="opacity-75" />
+                  <span className="text-xs font-bold">{item.label}</span>
                 </div>
+                <span className="font-mono text-lg font-black leading-none tabular-nums">{item.value}</span>
               </div>
             );
           })}
@@ -422,12 +420,14 @@ export default function App() {
                       const status = documentStatuses[index];
                       return (
                       <div key={`${document.awbNo}-${index}`} className={`inline-flex overflow-hidden rounded-xl border shadow-sm ${activeDocument === index ? "border-blue-500 bg-blue-50 ring-2 ring-blue-100" : "border-slate-300 bg-white"}`}>
-                        <button type="button" onClick={() => selectDocument(index)} className="min-w-[170px] px-3 py-2 text-left text-xs">
-                          <strong className="block text-slate-800">{document.awbNo || `문서 ${index + 1}`}</strong>
-                          <span className="text-slate-500">{documentNames[index] || `${document.items.length}개 상품`}</span>
-                          <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-bold ${statusClass(status.tone)}`}>
-                            {status.label}
+                        <button type="button" onClick={() => selectDocument(index)} className="min-w-[210px] px-3 py-2 text-left text-xs">
+                          <span className="flex items-center gap-2">
+                            <strong className="min-w-0 flex-1 truncate text-slate-800">{document.awbNo || `문서 ${index + 1}`}</strong>
+                            <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-bold ${statusClass(status.tone)}`}>
+                              {status.label}
+                            </span>
                           </span>
+                          <span className="mt-1 block max-w-[190px] truncate text-slate-500">{documentNames[index] || `${document.items.length}개 상품`}</span>
                         </button>
                         <button type="button" aria-label="문서 삭제" onClick={() => removeDocument(index)} className="border-l px-2 text-slate-400 hover:bg-red-50 hover:text-red-600">
                           <X size={15} />
