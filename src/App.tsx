@@ -36,8 +36,10 @@ export default function App() {
   const [managedExcel, setManagedExcel] = useState<File | null>(null);
   const [documents, setDocuments] = useState<PackingListData[]>([]);
   const [documentNames, setDocumentNames] = useState<string[]>([]);
+  const [documentPageImages, setDocumentPageImages] = useState<Blob[][]>([]);
   const [documentPageUrls, setDocumentPageUrls] = useState<string[][]>([]);
   const [activeDocument, setActiveDocument] = useState(-1);
+  const [activePdfPage, setActivePdfPage] = useState(0);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [leftPanelHeight, setLeftPanelHeight] = useState<number>();
   const leftPanelRef = useRef<HTMLDivElement>(null);
@@ -88,54 +90,70 @@ export default function App() {
   const processFiles = async (files: File[]) => {
     const existing = currentDocuments();
     const processed = await ocr.processFiles(files);
-    const next = [...existing, ...processed.map(({ result }) => result.data)];
+    const next = [...existing, ...processed.map(() => createEmptyPackingList())];
     setDocuments(next);
     setDocumentNames((current) => [...current, ...files.map((file) => file.name)]);
+    setDocumentPageImages((current) => [...current, ...processed.map(({ pageImages }) => pageImages)]);
     setDocumentPageUrls((current) => [...current, ...processed.map(({ pageUrls }) => pageUrls)]);
     const nextActive = next.length - 1;
     setActiveDocument(nextActive);
+    setActivePdfPage(0);
     if (nextActive >= 0) form.reset(next[nextActive]);
-    showToast(`${processed.length}개 PDF를 추가했습니다. 누적 ${next.length}건입니다.`);
+    showToast(`${processed.length}개 PDF를 추가했습니다. 오른쪽에서 필요한 페이지를 선택한 뒤 OCR 분석을 눌러주세요.`);
   };
 
   const selectDocument = (index: number) => {
     const next = currentDocuments();
     setDocuments(next);
     setActiveDocument(index);
+    setActivePdfPage(0);
     form.reset(next[index]);
   };
 
   const removeDocument = (index: number) => {
     const next = currentDocuments().filter((_, current) => current !== index);
     const nextNames = documentNames.filter((_, current) => current !== index);
+    const nextImages = documentPageImages.filter((_, current) => current !== index);
     const removedUrls = documentPageUrls[index] ?? [];
     const nextUrls = documentPageUrls.filter((_, current) => current !== index);
     ocr.releasePageUrls(removedUrls);
     setDocuments(next);
     setDocumentNames(nextNames);
+    setDocumentPageImages(nextImages);
     setDocumentPageUrls(nextUrls);
     if (!next.length) {
       setActiveDocument(-1);
+      setActivePdfPage(0);
       form.reset(createEmptyPackingList());
       return;
     }
     const nextActive = Math.min(index, next.length - 1);
     setActiveDocument(nextActive);
+    setActivePdfPage(0);
     form.reset(next[nextActive]);
   };
 
-  const rerunOcr = async () => {
-    if (activeDocument !== documents.length - 1) {
-      showToast("OCR 재실행은 가장 최근에 추가한 PDF에서 사용할 수 있습니다.", "error");
+  const analyzeSelectedPage = async () => {
+    if (activeDocument < 0) {
+      showToast("먼저 PDF 문서를 선택해 주세요.", "error");
       return;
     }
-    const result = await ocr.rerun();
-    if (!result || activeDocument < 0) return;
+    const pageImage = documentPageImages[activeDocument]?.[activePdfPage];
+    if (!pageImage) {
+      showToast("선택한 페이지 이미지를 찾을 수 없습니다.", "error");
+      return;
+    }
+    const result = await ocr.analyzePage(pageImage, activePdfPage + 1);
+    if (!result) return;
     const next = currentDocuments();
     next[activeDocument] = result.data;
     setDocuments(next);
     form.reset(result.data);
-    showToast("현재 PDF의 OCR 결과를 다시 반영했습니다.");
+    showToast(`PAGE ${activePdfPage + 1} OCR 결과를 반영했습니다.`);
+  };
+
+  const rerunOcr = async () => {
+    await analyzeSelectedPage();
   };
 
   const resetAll = () => {
@@ -144,8 +162,10 @@ export default function App() {
     form.reset(createEmptyPackingList());
     setDocuments([]);
     setDocumentNames([]);
+    setDocumentPageImages([]);
     setDocumentPageUrls([]);
     setActiveDocument(-1);
+    setActivePdfPage(0);
     setManagedExcel(null);
     setToast(null);
   };
@@ -155,8 +175,10 @@ export default function App() {
     const sample = structuredClone(SAMPLE_DATA);
     setDocuments([sample]);
     setDocumentNames(["샘플 패킹리스트"]);
+    setDocumentPageImages([[]]);
     setDocumentPageUrls([[]]);
     setActiveDocument(0);
+    setActivePdfPage(0);
     form.reset(sample);
     showToast("검수용 샘플 데이터를 불러왔습니다.");
   };
@@ -257,7 +279,7 @@ export default function App() {
                     <p className="text-xs text-slate-500">Excel에 반영되는 날짜와 AWB를 확인하세요.</p>
                   </div>
                   <div>
-                    <button type="button" disabled={ocr.isProcessing || activeDocument < 0 || activeDocument !== documents.length - 1} onClick={() => void rerunOcr()} className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold hover:bg-slate-50 disabled:opacity-40">
+                    <button type="button" disabled={ocr.isProcessing || activeDocument < 0} onClick={() => void rerunOcr()} className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold hover:bg-slate-50 disabled:opacity-40">
                       <RefreshCcw size={15} /> OCR 재실행
                     </button>
                   </div>
@@ -286,7 +308,13 @@ export default function App() {
                 <p className="text-xs text-slate-500">{activeDocument >= 0 ? documentNames[activeDocument] : "선택된 문서가 없습니다."}</p>
               </div>
               <div className="min-h-0 flex-1">
-                <PdfPreview pageUrls={activePageUrls} />
+                <PdfPreview
+                  pageUrls={activePageUrls}
+                  activePage={activePdfPage}
+                  disabled={ocr.isProcessing || activeDocument < 0}
+                  onActivePage={setActivePdfPage}
+                  onAnalyzePage={() => void analyzeSelectedPage()}
+                />
               </div>
             </section>
           </section>

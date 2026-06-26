@@ -11,7 +11,11 @@ export interface RenderedPdf {
 
 export async function renderPdf(file: File, scale = 2): Promise<RenderedPdf> {
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+  const pdf = await pdfjsLib.getDocument({
+    data: bytes,
+    isImageDecoderSupported: false,
+    useSystemFonts: true,
+  }).promise;
   const pageImages: Blob[] = [];
   const pageUrls: string[] = [];
 
@@ -23,6 +27,8 @@ export async function renderPdf(file: File, scale = 2): Promise<RenderedPdf> {
     canvas.height = viewport.height;
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) throw new Error("PDF 렌더링 컨텍스트를 만들 수 없습니다.");
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvas, canvasContext: context, viewport }).promise;
     const blob = await canvasToBlob(canvas);
     pageImages.push(blob);

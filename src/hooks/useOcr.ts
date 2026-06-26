@@ -5,18 +5,8 @@ import type { OcrProgress, OcrResult } from "../types/packingList";
 import { normalizeAwb } from "../utils/excelUtils";
 
 export interface ProcessedPdf {
-  result: OcrResult;
+  pageImages: Blob[];
   pageUrls: string[];
-}
-
-const OCR_PAGE_INDEX = 4;
-
-function fifthPageOnly(pageImages: Blob[]) {
-  const page = pageImages[OCR_PAGE_INDEX];
-  if (!page) {
-    throw new Error("이 PDF에는 5페이지가 없습니다. 5페이지가 포함된 패킹리스트 PDF를 업로드해 주세요.");
-  }
-  return [page];
 }
 
 export function useOcr() {
@@ -37,22 +27,11 @@ export function useOcr() {
           page: index + 1,
           totalPages: files.length,
           percent: Math.round((index / files.length) * 100),
-          status: `PDF ${index + 1}/${files.length} 렌더링 중`,
+          status: `PDF ${index + 1}/${files.length} 미리보기 준비 중`,
         });
         const rendered = await renderPdf(files[index]);
-        const ocrPageImages = fifthPageOnly(rendered.pageImages);
-        setLatestPageImages(ocrPageImages);
-        const rawText = await provider.current.extractText(ocrPageImages, (progress) => {
-          setProgress({
-            ...progress,
-            percent: Math.round(((index + progress.percent / 100) / files.length) * 100),
-            status: `PDF ${index + 1}/${files.length} · 5페이지 ${progress.status}`,
-          });
-        });
-        const result = await provider.current.extractFields(rawText);
-        result.data.awbNo = normalizeAwb(result.data.awbNo);
         processed.push({
-          result,
+          pageImages: rendered.pageImages,
           pageUrls: rendered.pageUrls,
         });
       }
@@ -60,7 +39,7 @@ export function useOcr() {
         page: files.length,
         totalPages: files.length,
         percent: 100,
-        status: `${files.length}개 PDF OCR 완료`,
+        status: `${files.length}개 PDF 미리보기 준비 완료`,
       });
       return processed;
     } catch (cause) {
@@ -71,12 +50,18 @@ export function useOcr() {
     }
   }, []);
 
-  const rerun = useCallback(async () => {
-    if (!latestPageImages.length) throw new Error("먼저 PDF를 업로드해 주세요.");
+  const analyzePage = useCallback(async (pageImage: Blob, pageNumber: number) => {
     setError("");
     setIsProcessing(true);
     try {
-      const rawText = await provider.current.extractText(latestPageImages, setProgress);
+      const selectedPage = [pageImage];
+      setLatestPageImages(selectedPage);
+      const rawText = await provider.current.extractText(selectedPage, (progress) => {
+        setProgress({
+          ...progress,
+          status: `PAGE ${pageNumber} ${progress.status}`,
+        });
+      });
       const nextResult = await provider.current.extractFields(rawText);
       nextResult.data.awbNo = normalizeAwb(nextResult.data.awbNo);
       return nextResult;
@@ -86,7 +71,12 @@ export function useOcr() {
     } finally {
       setIsProcessing(false);
     }
-  }, [latestPageImages]);
+  }, []);
+
+  const rerun = useCallback(async () => {
+    if (!latestPageImages.length) throw new Error("먼저 분석할 PDF 페이지를 선택해 주세요.");
+    return analyzePage(latestPageImages[0], 1);
+  }, [analyzePage, latestPageImages]);
 
   const reset = useCallback(() => {
     setLatestPageImages([]);
@@ -98,5 +88,5 @@ export function useOcr() {
     void provider.current.terminate();
   }, []);
 
-  return { progress, isProcessing, error, processFiles, rerun, reset, releasePageUrls };
+  return { progress, isProcessing, error, processFiles, analyzePage, rerun, reset, releasePageUrls };
 }
