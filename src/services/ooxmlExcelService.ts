@@ -147,6 +147,12 @@ function findReusableAwbBlock(sheet: XLSX.WorkSheet, headerRow: number, beforeCo
     }
   }
   if (bestColumn && bestScore >= 3) return bestColumn;
+
+  // 비어 있는 샘플 템플릿은 숨김 처리된 E:M 영역에 10/12/14/16/18 헤더가
+  // 아직 존재하지 않는다. 이때는 냉동 열 바로 앞의 숨김 상품 영역(E:I)을
+  // 서식 원본으로만 사용하고, 실제 헤더 값은 insertAwbBlock에서 새로 입력한다.
+  if (beforeColumn > 9) return beforeColumn - 9;
+
   throw new Error("새 AWB 열을 만들기 위한 상품 사이즈 블록을 찾을 수 없습니다.");
 }
 
