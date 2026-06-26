@@ -390,17 +390,99 @@ function adjustColumnReferences(value: string, insertionColumn: number, width: n
     /(\$?)([A-Z]{1,3})(\$?\d+)(?::(\$?)([A-Z]{1,3})(\$?\d+))?/g,
     (_match, firstAbsolute: string, firstColumnText: string, firstRow: string, secondAbsolute?: string, secondColumnText?: string, secondRow?: string) => {
       const firstColumn = XLSX.utils.decode_col(firstColumnText) + 1;
-      const shiftedFirst = firstColumn >= insertionColumn ? firstColumn + width : firstColumn;
       if (secondColumnText && secondRow) {
         const secondColumn = XLSX.utils.decode_col(secondColumnText) + 1;
+        const shiftedFirst = extendAtBoundary && firstColumn === insertionColumn
+          ? firstColumn
+          : firstColumn >= insertionColumn ? firstColumn + width : firstColumn;
         const shiftedSecond = secondColumn >= insertionColumn
           ? secondColumn + width
           : extendAtBoundary && secondColumn === insertionColumn - 1 ? secondColumn + width : secondColumn;
         return `${firstAbsolute}${XLSX.utils.encode_col(shiftedFirst - 1)}${firstRow}:${secondAbsolute ?? ""}${XLSX.utils.encode_col(shiftedSecond - 1)}${secondRow}`;
       }
+      const shiftedFirst = firstColumn >= insertionColumn ? firstColumn + width : firstColumn;
       return `${firstAbsolute}${XLSX.utils.encode_col(shiftedFirst - 1)}${firstRow}`;
     },
   );
+}
+
+function adjustDeletedColumnReferences(value: string, deletionColumn: number, width: number) {
+  const deletionEnd = deletionColumn + width - 1;
+  return value.replace(
+    /(\$?)([A-Z]{1,3})(\$?\d+)(?::(\$?)([A-Z]{1,3})(\$?\d+))?/g,
+    (_match, firstAbsolute: string, firstColumnText: string, firstRow: string, secondAbsolute?: string, secondColumnText?: string, secondRow?: string) => {
+      const firstColumn = XLSX.utils.decode_col(firstColumnText) + 1;
+      if (secondColumnText && secondRow) {
+        const secondColumn = XLSX.utils.decode_col(secondColumnText) + 1;
+        if (secondColumn < deletionColumn) return _match;
+        if (firstColumn > deletionEnd) {
+          return `${firstAbsolute}${XLSX.utils.encode_col(firstColumn - width - 1)}${firstRow}:${secondAbsolute ?? ""}${XLSX.utils.encode_col(secondColumn - width - 1)}${secondRow}`;
+        }
+
+        const survivingFirst = firstColumn < deletionColumn ? firstColumn : deletionColumn;
+        const survivingSecond = secondColumn > deletionEnd
+          ? secondColumn - width
+          : deletionColumn - 1;
+        if (survivingFirst > survivingSecond) return "#REF!";
+        return `${firstAbsolute}${XLSX.utils.encode_col(survivingFirst - 1)}${firstRow}:${secondAbsolute ?? ""}${XLSX.utils.encode_col(survivingSecond - 1)}${secondRow}`;
+      }
+
+      if (firstColumn < deletionColumn) return _match;
+      if (firstColumn > deletionEnd) {
+        return `${firstAbsolute}${XLSX.utils.encode_col(firstColumn - width - 1)}${firstRow}`;
+      }
+      return "#REF!";
+    },
+  );
+}
+
+function rewriteColumnDefinitions(
+  document: XmlDocument,
+  transform: (column: number) => number | undefined,
+) {
+  const columns = document.getElementsByTagNameNS(MAIN_NS, "cols")[0];
+  if (!columns) return;
+  const definitions = new Map<number, Record<string, string>>();
+
+  for (const columnElement of Array.from(columns.getElementsByTagNameNS(MAIN_NS, "col"))) {
+    const minimum = Number(columnElement.getAttribute("min"));
+    const maximum = Number(columnElement.getAttribute("max"));
+    if (!minimum || !maximum) continue;
+    const attributes: Record<string, string> = {};
+    for (let index = 0; index < columnElement.attributes.length; index += 1) {
+      const attribute = columnElement.attributes.item(index);
+      if (attribute && attribute.name !== "min" && attribute.name !== "max") {
+        attributes[attribute.name] = attribute.value;
+      }
+    }
+    for (let column = minimum; column <= maximum; column += 1) {
+      const nextColumn = transform(column);
+      if (nextColumn !== undefined) definitions.set(nextColumn, attributes);
+    }
+  }
+
+  while (columns.firstChild) columns.removeChild(columns.firstChild);
+  const ordered = [...definitions.entries()].sort(([first], [second]) => first - second);
+  let index = 0;
+  while (index < ordered.length) {
+    const [start, attributes] = ordered[index];
+    let end = start;
+    const signature = JSON.stringify(attributes);
+    while (
+      index + 1 < ordered.length &&
+      ordered[index + 1][0] === end + 1 &&
+      JSON.stringify(ordered[index + 1][1]) === signature
+    ) {
+      index += 1;
+      end = ordered[index][0];
+    }
+    const element = document.createElementNS(MAIN_NS, "col");
+    element.setAttribute("min", String(start));
+    element.setAttribute("max", String(end));
+    for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
+    columns.appendChild(element);
+    index += 1;
+  }
 }
 
 function translateCopiedFormula(value: string, columnDelta: number) {
@@ -446,15 +528,90 @@ function shiftWorksheetColumns(xml: string, insertionColumn: number, width: numb
     }
   }
 
-  for (const columnElement of Array.from(document.getElementsByTagNameNS(MAIN_NS, "col"))) {
-    const minimum = Number(columnElement.getAttribute("min"));
-    const maximum = Number(columnElement.getAttribute("max"));
-    if (!minimum || !maximum) continue;
-    if (minimum >= insertionColumn) {
-      columnElement.setAttribute("min", String(minimum + width));
-      columnElement.setAttribute("max", String(maximum + width));
-    } else if (maximum >= insertionColumn) {
-      columnElement.setAttribute("max", String(maximum + width));
+  rewriteColumnDefinitions(
+    document,
+    (column) => column >= insertionColumn ? column + width : column,
+  );
+  return new XMLSerializer().serializeToString(document);
+}
+
+function deleteWorksheetColumns(xml: string, deletionColumn: number, width: number) {
+  const deletionEnd = deletionColumn + width - 1;
+  const document = new DOMParser().parseFromString(xml, "application/xml");
+
+  for (const cell of Array.from(document.getElementsByTagNameNS(MAIN_NS, "c"))) {
+    const address = cell.getAttribute("r");
+    const match = address?.match(/^([A-Z]+)(\d+)$/);
+    if (!match) continue;
+    const column = XLSX.utils.decode_col(match[1]) + 1;
+    if (column >= deletionColumn && column <= deletionEnd) {
+      cell.parentNode?.removeChild(cell);
+    } else if (column > deletionEnd) {
+      cell.setAttribute("r", `${XLSX.utils.encode_col(column - width - 1)}${match[2]}`);
+    }
+  }
+
+  for (const row of Array.from(document.getElementsByTagNameNS(MAIN_NS, "row"))) {
+    row.removeAttribute("spans");
+  }
+
+  for (const formula of Array.from(document.getElementsByTagNameNS(MAIN_NS, "f"))) {
+    if (formula.textContent) {
+      const adjusted = adjustDeletedColumnReferences(formula.textContent, deletionColumn, width);
+      while (formula.firstChild) formula.removeChild(formula.firstChild);
+      formula.appendChild(document.createTextNode(adjusted));
+    }
+    const sharedRange = formula.getAttribute("ref");
+    if (sharedRange) {
+      formula.setAttribute("ref", adjustDeletedColumnReferences(sharedRange, deletionColumn, width));
+    }
+  }
+
+  for (const element of Array.from(document.getElementsByTagName("*"))) {
+    for (const attribute of ["ref", "sqref"]) {
+      if (element.localName === "f" && attribute === "ref") continue;
+      const value = element.getAttribute(attribute);
+      if (!value) continue;
+      const adjusted = adjustDeletedColumnReferences(value, deletionColumn, width);
+      if (adjusted.includes("#REF!") && element.localName === "mergeCell") {
+        element.parentNode?.removeChild(element);
+      } else {
+        element.setAttribute(attribute, adjusted);
+      }
+    }
+  }
+
+  rewriteColumnDefinitions(document, (column) => {
+    if (column >= deletionColumn && column <= deletionEnd) return undefined;
+    return column > deletionEnd ? column - width : column;
+  });
+  return new XMLSerializer().serializeToString(document);
+}
+
+function normalizeWorksheetMetadata(xml: string) {
+  const document = new DOMParser().parseFromString(xml, "application/xml");
+  const mergeCells = document.getElementsByTagNameNS(MAIN_NS, "mergeCells")[0];
+  if (mergeCells) {
+    mergeCells.setAttribute(
+      "count",
+      String(mergeCells.getElementsByTagNameNS(MAIN_NS, "mergeCell").length),
+    );
+  }
+
+  for (const row of Array.from(document.getElementsByTagNameNS(MAIN_NS, "row"))) {
+    const cells = Array.from(row.childNodes)
+      .filter((node): node is XmlElement => node.nodeType === 1 && node.localName === "c")
+      .sort((first, second) => {
+        const firstAddress = first.getAttribute("r") ?? "A1";
+        const secondAddress = second.getAttribute("r") ?? "A1";
+        return columnNumber(firstAddress) - columnNumber(secondAddress);
+      });
+    const extension = Array.from(row.childNodes)
+      .find((node) => node.nodeType === 1 && node.localName === "extLst");
+    for (const cell of cells) row.removeChild(cell);
+    for (const cell of cells) {
+      if (extension) row.insertBefore(cell, extension);
+      else row.appendChild(cell);
     }
   }
   return new XMLSerializer().serializeToString(document);
@@ -488,6 +645,42 @@ function upsertFormulaCell(rowXml: string, address: string, formula: string) {
   const style = styleAttribute(existing);
   const cell = `<c r="${address}"${style ? ` s="${style}"` : ""}><f>${escapeXml(formula)}</f><v>0</v></c>`;
   return existing ? rowXml.replace(existing, cell) : insertRawCell(rowXml, address, cell);
+}
+
+function translateCopiedRowFormula(value: string, rowDelta: number) {
+  return value.replace(
+    /(\$?[A-Z]{1,3})(\$?)(\d+)/g,
+    (_match, column: string, absoluteRow: string, rowText: string) => {
+      if (absoluteRow) return `${column}${absoluteRow}${rowText}`;
+      return `${column}${Number(rowText) + rowDelta}`;
+    },
+  );
+}
+
+function ensureTotalFormula(
+  xml: string,
+  targetRow: number,
+  dataStartRow: number,
+  totalColumn: number,
+) {
+  const column = XLSX.utils.encode_col(totalColumn - 1);
+  const targetAddress = `${column}${targetRow}`;
+  const targetRowXml = getRowXml(xml, targetRow);
+  const targetCell = getCellXml(targetRowXml, targetAddress);
+  if (/<f\b/.test(targetCell)) return xml;
+
+  for (let sourceRow = targetRow - 1; sourceRow >= dataStartRow; sourceRow -= 1) {
+    const sourceCell = getCellXml(getRowXml(xml, sourceRow), `${column}${sourceRow}`);
+    const formula = sourceCell.match(/<f(?:\s[^>]*)?>([\s\S]*?)<\/f>/)?.[1];
+    if (!formula) continue;
+    const nextRowXml = upsertFormulaCell(
+      targetRowXml,
+      targetAddress,
+      translateCopiedRowFormula(formula, targetRow - sourceRow),
+    );
+    return xml.replace(targetRowXml, nextRowXml);
+  }
+  return xml;
 }
 
 function insertAwbBlock(
@@ -695,7 +888,10 @@ function populateRow(
     }
   }
   const totalColumnName = XLSX.utils.encode_col(layout.totalColumn - 1);
-  result = upsertCell(result, `${totalColumnName}${row}`, totalQuantity, columnStyles.get(totalColumnName));
+  const totalAddress = `${totalColumnName}${row}`;
+  if (!/<f\b/.test(getCellXml(result, totalAddress))) {
+    result = upsertCell(result, totalAddress, totalQuantity, columnStyles.get(totalColumnName));
+  }
   return result;
 }
 
@@ -844,10 +1040,21 @@ function resolveFirstSheetPath(workbookXml: string, relationshipsXml: string) {
   return target.startsWith("/") ? target.slice(1) : `xl/${target.replace(/^\.\//, "")}`;
 }
 
-function removeCalcChain(zip: JSZip) {
-  // 원본 관계와 패키지 무결성을 보존하기 위해 calcChain 파트도 유지한다.
-  // Excel은 수정된 수식을 열 때 자동으로 다시 계산한다.
-  void zip;
+function removeCalcChain(
+  zip: JSZip,
+  relationshipsXml: string,
+  contentTypesXml: string,
+) {
+  zip.remove("xl/calcChain.xml");
+  const nextRelationships = relationshipsXml.replace(
+    /<Relationship\b[^>]*\bType="[^"]*\/calcChain"[^>]*\/>/g,
+    "",
+  );
+  const nextContentTypes = contentTypesXml.replace(
+    /<Override\b[^>]*\bPartName="\/xl\/calcChain\.xml"[^>]*\/>/g,
+    "",
+  );
+  return { relationshipsXml: nextRelationships, contentTypesXml: nextContentTypes };
 }
 
 function enableWorkbookRecalculation(workbookXml: string) {
@@ -869,7 +1076,7 @@ function enableWorkbookRecalculation(workbookXml: string) {
 export async function generateManagedWorkbookXml(
   file: File,
   data: PackingListData,
-  options: { blankQuarantineLoss?: boolean } = {},
+  options: { finalizeBundledTemplate?: boolean } = {},
 ) {
   const bytes = await file.arrayBuffer();
   const workbook = XLSX.read(bytes, {
@@ -884,7 +1091,10 @@ export async function generateManagedWorkbookXml(
   const zip = await JSZip.loadAsync(bytes);
   const workbookXml = await zip.file("xl/workbook.xml")?.async("string");
   const relationshipsXml = await zip.file("xl/_rels/workbook.xml.rels")?.async("string");
-  if (!workbookXml || !relationshipsXml) throw new Error("Excel 통합문서 구조를 읽을 수 없습니다.");
+  const contentTypesXml = await zip.file("[Content_Types].xml")?.async("string");
+  if (!workbookXml || !relationshipsXml || !contentTypesXml) {
+    throw new Error("Excel 통합문서 구조를 읽을 수 없습니다.");
+  }
   const sheetPath = resolveFirstSheetPath(workbookXml, relationshipsXml);
   let sheetXml = await zip.file(sheetPath)?.async("string");
   if (!sheetXml) throw new Error("출고요청서 시트 XML을 읽을 수 없습니다.");
@@ -921,19 +1131,28 @@ export async function generateManagedWorkbookXml(
     }
   }
 
+  sheetXml = ensureTotalFormula(
+    sheetXml,
+    targetRow,
+    layout.dataStartRow,
+    layout.totalColumn,
+  );
   const currentRow = getRowXml(sheetXml, targetRow);
   sheetXml = sheetXml.replace(currentRow, populateRow(currentRow, targetRow, layout, data, columnStyles));
   const outputSummaryRow = layout.summaryRow + (insertRow ? 1 : 0);
   sheetXml = updateCachedTotals(sheetXml, outputSummaryRow, layout, data);
-  if (options.blankQuarantineLoss) {
+  if (options.finalizeBundledTemplate) {
+    sheetXml = deleteWorksheetColumns(sheetXml, 5, 9);
     const sharedStringsXml = await zip.file("xl/sharedStrings.xml")?.async("string");
     if (sharedStringsXml) {
       sheetXml = clearRowsFromSharedString(sheetXml, sharedStringsXml, "검역로스");
     }
   }
-  zip.file(sheetPath, sheetXml);
+  zip.file(sheetPath, normalizeWorksheetMetadata(sheetXml));
   zip.file("xl/workbook.xml", enableWorkbookRecalculation(workbookXml));
-  removeCalcChain(zip);
+  const withoutCalcChain = removeCalcChain(zip, relationshipsXml, contentTypesXml);
+  zip.file("xl/_rels/workbook.xml.rels", withoutCalcChain.relationshipsXml);
+  zip.file("[Content_Types].xml", withoutCalcChain.contentTypesXml);
   return zip.generateAsync({
     type: "blob",
     mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

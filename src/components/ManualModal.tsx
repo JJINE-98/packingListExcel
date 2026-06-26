@@ -15,7 +15,7 @@ const steps = [
   {
     icon: ScanText,
     title: "2. OCR이 끝날 때까지 기다리기",
-    description: "업로드하면 글자와 숫자를 자동으로 읽습니다. 진행률이 100%가 될 때까지 기다려 주세요. 처리 중에는 창을 닫지 않는 것이 좋습니다.",
+    description: "업로드하면 패킹리스트 정보가 있는 5페이지만 자동으로 읽습니다. 진행률이 100%가 될 때까지 기다려 주세요.",
   },
   {
     icon: FileCheck2,
@@ -133,7 +133,7 @@ export function ManualModal({ open, onClose }: Props) {
             <h3 className="font-semibold text-blue-900">문제가 생겼을 때</h3>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-blue-900/80">
               <li>잘못 읽힌 값은 입력란에서 직접 수정하는 것이 가장 빠릅니다.</li>
-              <li>결과가 많이 틀렸다면 해당 문서를 선택한 뒤 <strong>OCR 재실행</strong>을 눌러 보세요.</li>
+              <li>OCR 재실행을 눌러도 PDF의 5페이지만 다시 읽습니다.</li>
               <li>오류가 발생하면 화면 알림창의 안내를 확인하고, 빠진 Date 또는 AWB를 먼저 입력하세요.</li>
             </ul>
           </div>

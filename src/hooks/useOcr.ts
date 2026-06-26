@@ -9,6 +9,16 @@ export interface ProcessedPdf {
   pageUrls: string[];
 }
 
+const OCR_PAGE_INDEX = 4;
+
+function fifthPageOnly(pageImages: Blob[]) {
+  const page = pageImages[OCR_PAGE_INDEX];
+  if (!page) {
+    throw new Error("이 PDF에는 5페이지가 없습니다. 5페이지가 포함된 패킹리스트 PDF를 업로드해 주세요.");
+  }
+  return [page];
+}
+
 export function useOcr() {
   const provider = useRef<IOcrProvider>(createOcrProvider());
   const [latestPageImages, setLatestPageImages] = useState<Blob[]>([]);
@@ -30,12 +40,13 @@ export function useOcr() {
           status: `PDF ${index + 1}/${files.length} 렌더링 중`,
         });
         const rendered = await renderPdf(files[index]);
-        setLatestPageImages(rendered.pageImages);
-        const rawText = await provider.current.extractText(rendered.pageImages, (progress) => {
+        const ocrPageImages = fifthPageOnly(rendered.pageImages);
+        setLatestPageImages(ocrPageImages);
+        const rawText = await provider.current.extractText(ocrPageImages, (progress) => {
           setProgress({
             ...progress,
             percent: Math.round(((index + progress.percent / 100) / files.length) * 100),
-            status: `PDF ${index + 1}/${files.length} · ${progress.status}`,
+            status: `PDF ${index + 1}/${files.length} · 5페이지 ${progress.status}`,
           });
         });
         const result = await provider.current.extractFields(rawText);

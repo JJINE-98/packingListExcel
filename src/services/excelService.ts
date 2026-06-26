@@ -386,6 +386,7 @@ export async function generateShippingWorkbook(documents: PackingListData[], man
   }
 
   let output: Blob = source;
+  let isFirstWrite = true;
   for (const document of documents) {
     for (const item of document.items) {
       const rowData: PackingListData = {
@@ -393,9 +394,10 @@ export async function generateShippingWorkbook(documents: PackingListData[], man
         items: [structuredClone(item)],
       };
       output = await generateManagedWorkbookXml(source, rowData, {
-        blankQuarantineLoss: usesBundledTemplate,
+        finalizeBundledTemplate: usesBundledTemplate && isFirstWrite,
       });
       source = new File([output], source.name, { type: MIME_XLSX });
+      isFirstWrite = false;
     }
   }
   return output;
