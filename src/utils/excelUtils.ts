@@ -14,8 +14,41 @@ export function normalizeDateInput(value: string) {
   if (isoMatch) return trimmed;
 
   const normalized = trimmed
-    .replace(/(\d{1,2})\s+([A-Za-z]{3})\.?,\s*(\d{4})/, "$1 $2 $3")
+    .replace(/(\d{1,2})\s*([A-Za-z]{3,9})\.?,?\s*(\d{4})/, "$1 $2 $3")
     .replace(/\./g, "");
+  const monthMatch = normalized.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})$/);
+  if (monthMatch) {
+    const months: Record<string, number> = {
+      jan: 1,
+      january: 1,
+      feb: 2,
+      february: 2,
+      mar: 3,
+      march: 3,
+      apr: 4,
+      april: 4,
+      may: 5,
+      jun: 6,
+      june: 6,
+      jul: 7,
+      july: 7,
+      aug: 8,
+      august: 8,
+      sep: 9,
+      sept: 9,
+      september: 9,
+      oct: 10,
+      october: 10,
+      nov: 11,
+      november: 11,
+      dec: 12,
+      december: 12,
+    };
+    const month = months[monthMatch[2].toLowerCase()];
+    if (month) {
+      return `${monthMatch[3]}-${String(month).padStart(2, "0")}-${String(Number(monthMatch[1])).padStart(2, "0")}`;
+    }
+  }
   const parsed = new Date(normalized);
   if (Number.isNaN(parsed.getTime())) return "";
   const year = parsed.getFullYear();

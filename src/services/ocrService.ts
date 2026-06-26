@@ -226,6 +226,7 @@ export class TesseractOcrProvider implements IOcrProvider {
     const worker = await this.getWorker();
     const bitmap = await createImageBitmap(image);
     const cells = [
+      { key: "DATE", rect: [0.348, 0.252, 0.842, 0.276], numeric: false },
       { key: "CUSTOMER", rect: [0.052, 0.431, 0.142, 0.466], numeric: false },
       { key: "PRODUCT", rect: [0.150, 0.410, 0.296, 0.466], numeric: false },
       { key: "SIZE_KG", rect: [0.304, 0.437, 0.343, 0.459], numeric: true },

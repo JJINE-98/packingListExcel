@@ -46,12 +46,23 @@ const cleanCountry = (value: string) => {
   return country.split(" ").slice(0, 3).join(" ");
 };
 
+const extractDate = (text: string) => {
+  const structuredDate = structuredValue(text, "DATE");
+  const datePatterns = [
+    /Date[ \t]*[:.]?[ \t]*(\d{1,2}\s*[A-Za-z]{3,9}\.?,?\s*\d{4})/i,
+    /Date[^\n\r]{0,30}?(\d{1,2}\s*[A-Za-z]{3,9}\.?,?\s*\d{4})/i,
+    /\b(\d{1,2}\s*[A-Za-z]{3,9}\.?,?\s*\d{4})\b/i,
+  ];
+  const matched = firstMatch(structuredDate, datePatterns) || firstMatch(text, datePatterns);
+  return normalizeDateInput(matched);
+};
+
 export function extractPackingList(rawText: string): PackingListData {
   const text = rawText.replace(/\r/g, "").replace(/[|]/g, "I");
   const data = createEmptyPackingList();
   const item = createEmptyItem();
 
-  data.date = normalizeDateInput(firstMatch(text, [/Date[ \t]*[:.]?[ \t]*([0-9]{1,2}[ \t]+[A-Za-z]{3}\.?,?[ \t]*[0-9]{4})/i]));
+  data.date = extractDate(text);
   data.invoiceNo = firstMatch(text, [/Invoice[ \t]*(?:Ref\.?[ \t]*)?No\.?[ \t]*[:.]?[ \t]*([A-Z0-9-]+)/i]);
   data.flight = firstMatch(text, [/Flight(?:[ \t]*No\.?)?[ \t]*[:.]?[ \t]*([A-Z0-9/-]+)/i]);
   data.destination = cleanCountry(

@@ -55,6 +55,12 @@ function normalizedDigits(value: string) {
   return value.replace(/\D/g, "");
 }
 
+function sizeHeaderNumber(value: string) {
+  const match = value.trim().match(/^(\d{1,2})(?:\s*과)?$/);
+  const size = match ? Number(match[1]) : Number(value);
+  return [10, 12, 14, 16, 18].includes(size) ? size : undefined;
+}
+
 function findHeaderRow(sheet: XLSX.WorkSheet, range: XLSX.Range) {
   for (let row = range.s.r + 1; row <= Math.min(range.e.r + 1, 60); row += 1) {
     for (let column = range.s.c + 1; column <= Math.min(range.e.c + 1, 12); column += 1) {
@@ -90,8 +96,8 @@ function findAwbColumn(sheet: XLSX.WorkSheet, headerRow: number, range: XLSX.Ran
 function findSizeColumns(sheet: XLSX.WorkSheet, headerRow: number, awbStartColumn: number) {
   const columns: DynamicLayout["sizeColumns"] = {};
   for (let column = awbStartColumn; column < awbStartColumn + 10; column += 1) {
-    const value = Number(cellText(sheet, headerRow, column));
-    if ([10, 12, 14, 16, 18].includes(value)) {
+    const value = sizeHeaderNumber(cellText(sheet, headerRow, column));
+    if (value) {
       columns[String(value) as keyof DynamicLayout["sizeColumns"]] = column;
       if (Object.keys(columns).length === 5) break;
     } else if (column > awbStartColumn && Object.keys(columns).length > 0) {
@@ -114,7 +120,7 @@ function findLabeledColumn(sheet: XLSX.WorkSheet, headerRow: number, range: XLSX
 function findReusableAwbBlock(sheet: XLSX.WorkSheet, headerRow: number, beforeColumn: number) {
   let reusable: number | undefined;
   for (let column = 1; column <= beforeColumn - 4; column += 1) {
-    const sizes = Array.from({ length: 5 }, (_, offset) => Number(cellText(sheet, headerRow, column + offset)));
+    const sizes = Array.from({ length: 5 }, (_, offset) => sizeHeaderNumber(cellText(sheet, headerRow, column + offset)));
     if (sizes.join(",") === "10,12,14,16,18") reusable = column;
   }
   if (reusable) return reusable;
@@ -129,8 +135,8 @@ function findReusableAwbBlock(sheet: XLSX.WorkSheet, headerRow: number, beforeCo
       { length: 5 },
       (_, offset) => cellText(sheet, headerRow, column + offset),
     );
-    const numericHeaders = values.filter((value) => /^\d+$/.test(value)).length;
-    const startsWithNumber = /^\d+$/.test(values[0]);
+    const numericHeaders = values.filter((value) => sizeHeaderNumber(value)).length;
+    const startsWithNumber = Boolean(sizeHeaderNumber(values[0]));
     if (
       numericHeaders > bestScore ||
       numericHeaders === bestScore && startsWithNumber && !bestStartsWithNumber
