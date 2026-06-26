@@ -18,7 +18,7 @@ import { ExcelUploader } from "./components/ExcelUploader";
 import { FileUploader } from "./components/FileUploader";
 import { ManualModal } from "./components/ManualModal";
 import { PdfPreview } from "./components/PdfPreview";
-import { createEmptyPackingList, SAMPLE_DATA } from "./config/packingListFields";
+import { createEmptyPackingList } from "./config/packingListFields";
 import { useExcelExport } from "./hooks/useExcelExport";
 import { useOcr } from "./hooks/useOcr";
 import type { PackingListData } from "./types/packingList";
@@ -260,19 +260,6 @@ export default function App() {
     setToast(null);
   };
 
-  const loadSample = () => {
-    ocr.releasePageUrls(documentPageUrls.flat());
-    const sample = structuredClone(SAMPLE_DATA);
-    setDocuments([sample]);
-    setDocumentNames(["샘플 패킹리스트"]);
-    setDocumentPageImages([[]]);
-    setDocumentPageUrls([[]]);
-    setActiveDocument(0);
-    setActivePdfPage(0);
-    form.reset(sample);
-    showToast("검수용 샘플 데이터를 불러왔습니다.");
-  };
-
   const download = form.handleSubmit(async (data) => {
     try {
       const next = documents.map((document) => structuredClone(document));
@@ -371,27 +358,6 @@ export default function App() {
       <main className="mx-auto max-w-[1800px] space-y-5 p-5">
         <FileUploader disabled={ocr.isProcessing} onFiles={processFiles} onError={(message) => showToast(message, "error")} />
 
-        <section className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-card">
-          {[
-            { label: "총 문서", value: statusSummary.total, icon: FileText, tone: "border-slate-200 bg-slate-50 text-slate-700" },
-            { label: "정상", value: statusSummary.complete, icon: CheckCircle2, tone: "border-emerald-200 bg-emerald-50 text-emerald-700" },
-            { label: "확인 필요", value: statusSummary.needsCheck, icon: AlertTriangle, tone: "border-amber-200 bg-amber-50 text-amber-700" },
-            { label: "필수값 미입력", value: statusSummary.missing, icon: AlertCircle, tone: "border-slate-200 bg-slate-100 text-slate-600" },
-            { label: "중복 AWB", value: statusSummary.duplicate, icon: FileCheck2, tone: statusSummary.duplicate ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 bg-slate-50 text-slate-600" },
-          ].map((item) => {
-            const Icon = item.icon;
-            return (
-              <div key={item.label} className={`inline-flex min-w-[128px] items-center justify-between gap-3 rounded-xl border px-3 py-2 ${item.tone}`}>
-                <div className="inline-flex items-center gap-2">
-                  <Icon size={15} className="opacity-75" />
-                  <span className="text-xs font-bold">{item.label}</span>
-                </div>
-                <span className="font-mono text-lg font-black leading-none tabular-nums">{item.value}</span>
-              </div>
-            );
-          })}
-        </section>
-
         {(ocr.progress || ocr.isProcessing) && (
           <section className="rounded-xl border bg-white p-4 shadow-card">
             <div className="mb-2 flex justify-between text-sm"><span>{ocr.progress?.status}</span><strong>{ocr.progress?.percent ?? 0}%</strong></div>
@@ -408,9 +374,23 @@ export default function App() {
                     <h2 className="font-semibold">스캔한 패킹리스트</h2>
                     <p className="text-xs text-slate-500">문서를 선택하면 아래 정보와 오른쪽 PDF가 함께 변경됩니다.</p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{documents.length}건</span>
-                    <button type="button" onClick={loadSample} className="text-xs font-semibold text-blue-600 hover:text-blue-800">샘플값</button>
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    {[
+                      { label: "총", value: statusSummary.total, icon: FileText, tone: "border-slate-200 bg-slate-50 text-slate-700" },
+                      { label: "정상", value: statusSummary.complete, icon: CheckCircle2, tone: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+                      { label: "확인", value: statusSummary.needsCheck, icon: AlertTriangle, tone: "border-amber-200 bg-amber-50 text-amber-700" },
+                      { label: "미입력", value: statusSummary.missing, icon: AlertCircle, tone: "border-slate-200 bg-slate-100 text-slate-600" },
+                      { label: "중복", value: statusSummary.duplicate, icon: FileCheck2, tone: statusSummary.duplicate ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 bg-slate-50 text-slate-600" },
+                    ].map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <span key={item.label} className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold ${item.tone}`}>
+                          <Icon size={13} className="opacity-75" />
+                          {item.label}
+                          <span className="font-mono text-xs font-black tabular-nums">{item.value}</span>
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
 
