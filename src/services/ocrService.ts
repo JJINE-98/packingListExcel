@@ -14,6 +14,69 @@ export class TesseractOcrProvider implements IOcrProvider {
   private totalPages = 1;
   private onProgress?: (progress: OcrProgress) => void;
 
+  private estimateSkewAngle(source: ImageBitmap) {
+    const sampleWidth = 720;
+    const sampleScale = sampleWidth / source.width;
+    const sampleHeight = Math.max(1, Math.round(source.height * sampleScale));
+    const canvas = document.createElement("canvas");
+    canvas.width = sampleWidth;
+    canvas.height = sampleHeight;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return 0;
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+
+    const image = context.getImageData(0, 0, canvas.width, canvas.height);
+    const darkPixels: Array<[number, number]> = [];
+    for (let y = 0; y < canvas.height; y += 2) {
+      for (let x = 0; x < canvas.width; x += 2) {
+        const index = (y * canvas.width + x) * 4;
+        const grey = image.data[index] * 0.299 + image.data[index + 1] * 0.587 + image.data[index + 2] * 0.114;
+        if (grey < 120) darkPixels.push([x - canvas.width / 2, y - canvas.height / 2]);
+      }
+    }
+    if (darkPixels.length < 500) return 0;
+
+    let bestAngle = 0;
+    let bestScore = -Infinity;
+    for (let angle = -4; angle <= 4.001; angle += 0.25) {
+      const radians = angle * Math.PI / 180;
+      const sin = Math.sin(radians);
+      const cos = Math.cos(radians);
+      const projection = new Map<number, number>();
+      for (const [x, y] of darkPixels) {
+        const projectedY = Math.round((-x * sin + y * cos) / 2);
+        projection.set(projectedY, (projection.get(projectedY) ?? 0) + 1);
+      }
+      let score = 0;
+      for (const count of projection.values()) {
+        if (count > 8) score += count * count;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestAngle = angle;
+      }
+    }
+    return Math.abs(bestAngle) < 0.2 ? 0 : bestAngle;
+  }
+
+  private deskewBitmap(source: ImageBitmap) {
+    const angle = this.estimateSkewAngle(source);
+    if (!angle) return source;
+    const canvas = document.createElement("canvas");
+    canvas.width = source.width;
+    canvas.height = source.height;
+    const context = canvas.getContext("2d");
+    if (!context) return source;
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.translate(canvas.width / 2, canvas.height / 2);
+    context.rotate(-angle * Math.PI / 180);
+    context.drawImage(source, -source.width / 2, -source.height / 2);
+    return canvas;
+  }
+
   private async getWorker() {
     if (this.worker) return this.worker;
     this.worker = await createWorker("eng", 1, {
@@ -34,7 +97,7 @@ export class TesseractOcrProvider implements IOcrProvider {
   }
 
   private createCellCanvas(
-    bitmap: ImageBitmap,
+    bitmap: ImageBitmap | HTMLCanvasElement,
     ratios: readonly [number, number, number, number],
     binary = false,
     insetFactor = 0,
@@ -126,7 +189,7 @@ export class TesseractOcrProvider implements IOcrProvider {
 
   private async recognizeNumericCandidates(
     worker: Worker,
-    bitmap: ImageBitmap,
+    bitmap: ImageBitmap | HTMLCanvasElement,
     rect: readonly [number, number, number, number],
   ) {
     const candidates = new Map<number, number>();
@@ -225,6 +288,7 @@ export class TesseractOcrProvider implements IOcrProvider {
   private async recognizePackingTable(image: Blob) {
     const worker = await this.getWorker();
     const bitmap = await createImageBitmap(image);
+    const tableImage = this.deskewBitmap(bitmap);
     const cells = [
       { key: "DATE", rect: [0.348, 0.252, 0.842, 0.276], numeric: false },
       { key: "CUSTOMER", rect: [0.052, 0.431, 0.142, 0.466], numeric: false },
@@ -254,9 +318,9 @@ export class TesseractOcrProvider implements IOcrProvider {
         user_defined_dpi: "300",
       });
       if (cell.numeric) {
-        numericCandidates.set(cell.key, await this.recognizeNumericCandidates(worker, bitmap, cell.rect));
+        numericCandidates.set(cell.key, await this.recognizeNumericCandidates(worker, tableImage, cell.rect));
       } else {
-        const result = await worker.recognize(this.createCellCanvas(bitmap, cell.rect));
+        const result = await worker.recognize(this.createCellCanvas(tableImage, cell.rect));
         values.push(`${cell.key}: ${result.data.text.replace(/\s+/g, " ").trim()}`);
       }
     }

@@ -5,9 +5,13 @@ import type { OcrProgress, OcrResult } from "../types/packingList";
 import { normalizeAwb } from "../utils/excelUtils";
 
 export interface ProcessedPdf {
+  result?: OcrResult;
+  defaultOcrPageIndex?: number;
   pageImages: Blob[];
   pageUrls: string[];
 }
+
+const DEFAULT_OCR_PAGE_INDEX = 4;
 
 export function useOcr() {
   const provider = useRef<IOcrProvider>(createOcrProvider());
@@ -30,7 +34,24 @@ export function useOcr() {
           status: `PDF ${index + 1}/${files.length} 미리보기 준비 중`,
         });
         const rendered = await renderPdf(files[index]);
+        const defaultOcrPage = rendered.pageImages[DEFAULT_OCR_PAGE_INDEX];
+        let result: OcrResult | undefined;
+        if (defaultOcrPage) {
+          const selectedPage = [defaultOcrPage];
+          setLatestPageImages(selectedPage);
+          const rawText = await provider.current.extractText(selectedPage, (progress) => {
+            setProgress({
+              ...progress,
+              percent: Math.round(((index + progress.percent / 100) / files.length) * 100),
+              status: `PDF ${index + 1}/${files.length} · 기본 PAGE 5 ${progress.status}`,
+            });
+          });
+          result = await provider.current.extractFields(rawText);
+          result.data.awbNo = normalizeAwb(result.data.awbNo);
+        }
         processed.push({
+          result,
+          defaultOcrPageIndex: defaultOcrPage ? DEFAULT_OCR_PAGE_INDEX : undefined,
           pageImages: rendered.pageImages,
           pageUrls: rendered.pageUrls,
         });

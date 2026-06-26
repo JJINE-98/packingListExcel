@@ -90,16 +90,21 @@ export default function App() {
   const processFiles = async (files: File[]) => {
     const existing = currentDocuments();
     const processed = await ocr.processFiles(files);
-    const next = [...existing, ...processed.map(() => createEmptyPackingList())];
+    const next = [...existing, ...processed.map(({ result }) => result?.data ?? createEmptyPackingList())];
     setDocuments(next);
     setDocumentNames((current) => [...current, ...files.map((file) => file.name)]);
     setDocumentPageImages((current) => [...current, ...processed.map(({ pageImages }) => pageImages)]);
     setDocumentPageUrls((current) => [...current, ...processed.map(({ pageUrls }) => pageUrls)]);
     const nextActive = next.length - 1;
+    const activeProcessed = processed[processed.length - 1];
     setActiveDocument(nextActive);
-    setActivePdfPage(0);
+    setActivePdfPage(activeProcessed?.defaultOcrPageIndex ?? 0);
     if (nextActive >= 0) form.reset(next[nextActive]);
-    showToast(`${processed.length}개 PDF를 추가했습니다. 오른쪽에서 필요한 페이지를 선택한 뒤 OCR 분석을 눌러주세요.`);
+    showToast(
+      processed.some(({ result }) => result)
+        ? `${processed.length}개 PDF를 추가하고 기본 PAGE 5 OCR을 완료했습니다. 다른 페이지가 패킹리스트라면 현재 페이지 OCR 분석을 눌러주세요.`
+        : `${processed.length}개 PDF를 추가했습니다. 오른쪽에서 필요한 페이지를 선택한 뒤 OCR 분석을 눌러주세요.`,
+    );
   };
 
   const selectDocument = (index: number) => {
