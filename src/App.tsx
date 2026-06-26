@@ -69,11 +69,11 @@ function documentStatus(document: PackingListData, duplicateAwbs: Set<string>) {
     } as const;
   }
   const mismatch = quantityMismatch(document);
-  if (mismatch) {
+  if (mismatch || document.reviewWarnings?.length) {
     return {
       label: "수량 확인",
       tone: "warning",
-      message: `${mismatch.sizeTotal} / ${mismatch.totalQty}`,
+      message: mismatch ? `${mismatch.sizeTotal} / ${mismatch.totalQty}` : "OCR 후보 확인",
     } as const;
   }
   return {
@@ -314,6 +314,19 @@ export default function App() {
           `${label}의 사이즈별 수량 합계(${mismatch.sizeTotal})와 Total Qty(${mismatch.totalQty})가 다릅니다. 값을 확인해 주세요.`,
           "error",
         );
+        return;
+      }
+      const reviewIndex = next.findIndex((document) => document.reviewWarnings?.length);
+      if (reviewIndex >= 0) {
+        setActiveDocument(reviewIndex);
+        setActivePdfPage(defaultPdfPageIndex(documentPageUrls[reviewIndex]?.length ?? 0));
+        form.reset(next[reviewIndex]);
+        window.setTimeout(() => {
+          leftPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+          form.setFocus("items.0.totalQuantity");
+        }, 50);
+        const label = next[reviewIndex].awbNo || documentNames[reviewIndex] || `문서 ${reviewIndex + 1}`;
+        showToast(`${label}의 수량 OCR 후보가 서로 달라 확인이 필요합니다. 원본 PDF와 수량을 비교해 주세요.`, "error");
         return;
       }
       await excel.exportExcel(next, managedExcel);

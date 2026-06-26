@@ -404,6 +404,23 @@ export class TesseractOcrProvider implements IOcrProvider {
     }
   }
 
+  private quantityReviewRequired(
+    candidates: Map<string, Array<{ value: number; confidence: number }>>,
+    selected: Map<string, number | undefined>,
+  ) {
+    const reviewKeys = ["SIZE_10", "SIZE_12", "SIZE_14", "SIZE_16", "SIZE_18"];
+    return reviewKeys.some((key) => {
+      const selectedValue = selected.get(key);
+      if (selectedValue === undefined) return false;
+      const alternatives = (candidates.get(key) ?? [])
+        .filter((candidate) => candidate.value !== selectedValue)
+        .filter((candidate) => candidate.value > 0);
+      if (!alternatives.length) return false;
+      const selectedConfidence = candidates.get(key)?.find((candidate) => candidate.value === selectedValue)?.confidence ?? 0;
+      return alternatives.some((candidate) => candidate.confidence >= selectedConfidence - 35);
+    });
+  }
+
   private chooseQuantityCandidates(
     candidates: Map<string, Array<{ value: number; confidence: number }>>,
   ) {
@@ -526,6 +543,10 @@ export class TesseractOcrProvider implements IOcrProvider {
       this.applyWideRowCandidates(numericCandidates, await this.recognizeWideProductRow(worker, alignedBitmap));
     }
     const selectedNumbers = this.chooseQuantityCandidates(numericCandidates);
+    if (this.quantityReviewRequired(numericCandidates, selectedNumbers)) {
+      values.push("QUANTITY_REVIEW_REQUIRED: 1");
+      values.push("QUANTITY_REVIEW_REASON: OCR quantity candidates disagree");
+    }
     for (const cell of cells.filter((candidate) => candidate.numeric)) {
       values.push(`${cell.key}: ${selectedNumbers.get(cell.key) ?? ""}`);
     }

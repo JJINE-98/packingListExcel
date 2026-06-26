@@ -23,6 +23,7 @@ export interface PackingListData {
   shipBy: string;
   awbNo: string;
   items: PackingListItem[];
+  reviewWarnings?: string[];
 }
 
 export interface OcrResult {

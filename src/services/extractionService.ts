@@ -61,6 +61,9 @@ export function extractPackingList(rawText: string): PackingListData {
   const text = rawText.replace(/\r/g, "").replace(/[|]/g, "I");
   const data = createEmptyPackingList();
   const item = createEmptyItem();
+  if (structuredValue(text, "QUANTITY_REVIEW_REQUIRED") === "1") {
+    data.reviewWarnings = [structuredValue(text, "QUANTITY_REVIEW_REASON") || "수량 OCR 후보가 서로 달라 확인이 필요합니다."];
+  }
 
   data.date = extractDate(text);
   data.invoiceNo = firstMatch(text, [/Invoice[ \t]*(?:Ref\.?[ \t]*)?No\.?[ \t]*[:.]?[ \t]*([A-Z0-9-]+)/i]);
