@@ -1,8 +1,11 @@
 import {
   AlertCircle,
+  AlertTriangle,
   BookOpen,
   CheckCircle2,
   Database,
+  FileCheck2,
+  FileText,
   RefreshCcw,
   RotateCcw,
   X,
@@ -40,6 +43,53 @@ function quantityMismatch(document: PackingListData) {
     : undefined;
 }
 
+function normalizedAwbKey(awbNo: string) {
+  return awbNo.replace(/\D/g, "");
+}
+
+function requiredMissing(document: PackingListData) {
+  const item = document.items[0];
+  return !document.date || !document.awbNo || !item || item.totalQuantity === "";
+}
+
+function documentStatus(document: PackingListData, duplicateAwbs: Set<string>) {
+  const awbKey = normalizedAwbKey(document.awbNo);
+  if (requiredMissing(document)) {
+    return {
+      label: "미입력",
+      tone: "neutral",
+      message: "필수값 확인",
+    } as const;
+  }
+  if (awbKey && duplicateAwbs.has(awbKey)) {
+    return {
+      label: "중복 AWB",
+      tone: "danger",
+      message: "AWB 중복",
+    } as const;
+  }
+  const mismatch = quantityMismatch(document);
+  if (mismatch) {
+    return {
+      label: "수량 확인",
+      tone: "warning",
+      message: `${mismatch.sizeTotal} / ${mismatch.totalQty}`,
+    } as const;
+  }
+  return {
+    label: "정상",
+    tone: "success",
+    message: "검증 완료",
+  } as const;
+}
+
+function statusClass(tone: ReturnType<typeof documentStatus>["tone"]) {
+  if (tone === "success") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (tone === "warning") return "border-amber-200 bg-amber-50 text-amber-700";
+  if (tone === "danger") return "border-red-200 bg-red-50 text-red-700";
+  return "border-slate-200 bg-slate-100 text-slate-600";
+}
+
 export default function App() {
   const ocr = useOcr();
   const excel = useExcelExport();
@@ -56,6 +106,7 @@ export default function App() {
   const [leftPanelHeight, setLeftPanelHeight] = useState<number>();
   const leftPanelRef = useRef<HTMLDivElement>(null);
   const pageUrlsRef = useRef<string[][]>([]);
+  const watchedForm = form.watch();
 
   useEffect(() => {
     pageUrlsRef.current = documentPageUrls;
@@ -97,6 +148,26 @@ export default function App() {
     const next = documents.map((document) => structuredClone(document));
     if (activeDocument >= 0 && next[activeDocument]) next[activeDocument] = form.getValues();
     return next;
+  };
+
+  const visibleDocuments = documents.map((document, index) =>
+    index === activeDocument ? watchedForm : document,
+  );
+  const awbCounts = visibleDocuments.reduce<Record<string, number>>((counts, document) => {
+    const key = normalizedAwbKey(document.awbNo);
+    if (key) counts[key] = (counts[key] ?? 0) + 1;
+    return counts;
+  }, {});
+  const duplicateAwbs = new Set(
+    Object.entries(awbCounts).filter(([, count]) => count > 1).map(([key]) => key),
+  );
+  const documentStatuses = visibleDocuments.map((document) => documentStatus(document, duplicateAwbs));
+  const statusSummary = {
+    total: visibleDocuments.length,
+    complete: documentStatuses.filter((status) => status.tone === "success").length,
+    needsCheck: documentStatuses.filter((status) => status.tone === "warning" || status.tone === "danger").length,
+    missing: documentStatuses.filter((status) => status.tone === "neutral").length,
+    duplicate: duplicateAwbs.size,
   };
 
   const processFiles = async (files: File[]) => {
@@ -208,6 +279,39 @@ export default function App() {
       if (activeDocument >= 0 && next[activeDocument]) next[activeDocument] = data;
       if (!next.length) next.push(data);
       setDocuments(next);
+      const nextAwbCounts = next.reduce<Record<string, number>>((counts, document) => {
+        const key = normalizedAwbKey(document.awbNo);
+        if (key) counts[key] = (counts[key] ?? 0) + 1;
+        return counts;
+      }, {});
+      const missingIndex = next.findIndex((document) => requiredMissing(document));
+      if (missingIndex >= 0) {
+        setActiveDocument(missingIndex);
+        setActivePdfPage(defaultPdfPageIndex(documentPageUrls[missingIndex]?.length ?? 0));
+        form.reset(next[missingIndex]);
+        window.setTimeout(() => {
+          leftPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+          form.setFocus(!next[missingIndex].date ? "date" : !next[missingIndex].awbNo ? "awbNo" : "items.0.totalQuantity");
+        }, 50);
+        const label = next[missingIndex].awbNo || documentNames[missingIndex] || `문서 ${missingIndex + 1}`;
+        showToast(`${label}에 필수값이 비어 있습니다. Date, AWB NO., Total Qty를 확인해 주세요.`, "error");
+        return;
+      }
+      const duplicateIndex = next.findIndex((document) => {
+        const key = normalizedAwbKey(document.awbNo);
+        return key && nextAwbCounts[key] > 1;
+      });
+      if (duplicateIndex >= 0) {
+        setActiveDocument(duplicateIndex);
+        setActivePdfPage(defaultPdfPageIndex(documentPageUrls[duplicateIndex]?.length ?? 0));
+        form.reset(next[duplicateIndex]);
+        window.setTimeout(() => {
+          leftPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+          form.setFocus("awbNo");
+        }, 50);
+        showToast(`${next[duplicateIndex].awbNo} AWB가 중복 등록되었습니다. 문서를 확인해 주세요.`, "error");
+        return;
+      }
       const mismatchIndex = next.findIndex((document) => quantityMismatch(document));
       if (mismatchIndex >= 0) {
         const mismatch = quantityMismatch(next[mismatchIndex])!;
@@ -248,8 +352,8 @@ export default function App() {
   const activePageUrls = activeDocument >= 0 ? documentPageUrls[activeDocument] ?? [] : [];
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900">
-      <header className="border-b bg-white">
+    <div className="min-h-screen bg-[#eef2f7] text-slate-900">
+      <header className="border-b border-slate-200 bg-white/95 shadow-sm">
         <div className="mx-auto flex max-w-[1800px] items-center justify-between gap-4 px-5 py-4">
           <div>
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-blue-600"><Database size={15} /> Shipping Operations</div>
@@ -267,6 +371,29 @@ export default function App() {
       <main className="mx-auto max-w-[1800px] space-y-5 p-5">
         <FileUploader disabled={ocr.isProcessing} onFiles={processFiles} onError={(message) => showToast(message, "error")} />
 
+        <section className="grid gap-3 md:grid-cols-5">
+          {[
+            { label: "총 문서", value: statusSummary.total, icon: FileText, tone: "border-slate-200 bg-white text-slate-700" },
+            { label: "정상", value: statusSummary.complete, icon: CheckCircle2, tone: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+            { label: "확인 필요", value: statusSummary.needsCheck, icon: AlertTriangle, tone: "border-amber-200 bg-amber-50 text-amber-700" },
+            { label: "필수값 미입력", value: statusSummary.missing, icon: AlertCircle, tone: "border-slate-200 bg-slate-100 text-slate-600" },
+            { label: "중복 AWB", value: statusSummary.duplicate, icon: FileCheck2, tone: statusSummary.duplicate ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 bg-white text-slate-600" },
+          ].map((item) => {
+            const Icon = item.icon;
+            return (
+              <div key={item.label} className={`rounded-xl border px-4 py-3 shadow-sm ${item.tone}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] opacity-75">{item.label}</p>
+                    <p className="mt-1 font-mono text-2xl font-black tabular-nums">{item.value}</p>
+                  </div>
+                  <Icon size={22} className="opacity-70" />
+                </div>
+              </div>
+            );
+          })}
+        </section>
+
         {(ocr.progress || ocr.isProcessing) && (
           <section className="rounded-xl border bg-white p-4 shadow-card">
             <div className="mb-2 flex justify-between text-sm"><span>{ocr.progress?.status}</span><strong>{ocr.progress?.percent ?? 0}%</strong></div>
@@ -277,7 +404,7 @@ export default function App() {
         <form className="space-y-5" onSubmit={download}>
           <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(480px,0.92fr)]">
             <div ref={leftPanelRef} className="self-start space-y-5">
-              <section className="rounded-2xl border bg-white p-4 shadow-card">
+              <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h2 className="font-semibold">스캔한 패킹리스트</h2>
@@ -291,17 +418,22 @@ export default function App() {
 
                 {documents.length ? (
                   <div className="flex flex-wrap gap-2">
-                    {documents.map((document, index) => (
-                      <div key={`${document.awbNo}-${index}`} className={`inline-flex overflow-hidden rounded-lg border ${activeDocument === index ? "border-blue-500 bg-blue-50 shadow-sm" : "border-slate-300 bg-white"}`}>
-                        <button type="button" onClick={() => selectDocument(index)} className="px-3 py-2 text-left text-xs">
+                    {documents.map((document, index) => {
+                      const status = documentStatuses[index];
+                      return (
+                      <div key={`${document.awbNo}-${index}`} className={`inline-flex overflow-hidden rounded-xl border shadow-sm ${activeDocument === index ? "border-blue-500 bg-blue-50 ring-2 ring-blue-100" : "border-slate-300 bg-white"}`}>
+                        <button type="button" onClick={() => selectDocument(index)} className="min-w-[170px] px-3 py-2 text-left text-xs">
                           <strong className="block text-slate-800">{document.awbNo || `문서 ${index + 1}`}</strong>
                           <span className="text-slate-500">{documentNames[index] || `${document.items.length}개 상품`}</span>
+                          <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-bold ${statusClass(status.tone)}`}>
+                            {status.label}
+                          </span>
                         </button>
                         <button type="button" aria-label="문서 삭제" onClick={() => removeDocument(index)} className="border-l px-2 text-slate-400 hover:bg-red-50 hover:text-red-600">
                           <X size={15} />
                         </button>
                       </div>
-                    ))}
+                    );})}
                   </div>
                 ) : (
                   <div className="rounded-xl border border-dashed bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">상단에서 패킹리스트 PDF를 추가하세요.</div>
